@@ -1056,6 +1056,15 @@ class LiveBody:
             return Result(SkillOutcome.ABORTED, "quest has no placed NPC", "unsupported")
         if node.target_kind not in ("creature", "gameobject") or not node.target_name:
             return Result(SkillOutcome.ABORTED, "quest target needs a supported identity", "unsupported")
+        # An accept can be armed again while the rolling log catches up. Keep observing
+        # that same assembly: reopening the giver must not throw its collected slots away.
+        # Once the log confirms the accept, no second interaction is needed.
+        if node.kind is StepKind.QUEST_ACCEPT:
+            self._quest_ids()
+            with self.client._capturing:
+                log = self.client.log.complete
+            if log is not None and any(q.quest_id == node.quest_id for q in log):
+                return Result(SkillOutcome.SUCCEEDED, "quest already in the assembled log", "done")
         if node.target_kind == "gameobject":
             # A wanted poster or a body: stood at, found by the name its tooltip gives.
             self._approach(node.world)
@@ -1076,8 +1085,8 @@ class LiveBody:
             chose = self.chooser.run(node.title)
             if not chose.ok:
                 return self._result(chose, self.chooser.detail)
-        with self.client._capturing:
-            self.client.log.reset()
+        # QuestLog invalidates itself when the painted count/hash changes. Resetting it
+        # here starves a slow reader on every retry (the hive's rolling-log accept loop).
         goal = Goal.HELD if node.kind is StepKind.QUEST_ACCEPT else Goal.CLEARED
         outcome = self.advance.run(node.quest_id, goal)
         return self._result(outcome, self.advance.detail)
@@ -1735,7 +1744,7 @@ class LiveBody:
                       "char.race_id": RACE_IDS.get(state.char.race)}
             level = state.char.level
             roles = self._provision_roles(values)
-            sold = self._sold_in_box()
+            sold = self._sold_in_box(state.pos.zone_id)
             empty = tuple(role for role in roles if stock(rows, role, level) == 0)
             prices = [p.price for item, p in provisions().items()
                       if item in sold and (level is None or p.level <= level)
@@ -1745,6 +1754,14 @@ class LiveBody:
                           near=near, near_price=near_price)
         except Exception:
             return None
+
+    def supply_facts(self, state: State) -> dict:
+        """Only cached observations/catalog data; safe to ask from the policy thread."""
+        rows = getattr(self, "_larder_rows", None)
+        if rows is None:
+            raise LookupError("inventory census is incomplete")
+        return {"inventory": sorted(rows.items()),
+                "sold": sorted(self._sold_in_box(state.pos.zone_id))}
 
     def _provisions_near(self, state: State, rows: dict[int, int], roles, level,
                          sold) -> tuple[tuple[str, ...], int | None]:
@@ -2170,6 +2187,7 @@ class LiveBody:
         context.repairer_near, context.disarmed = self.repairer_near, self.disarmed
         context.ammo_low = self.ammo_low
         context.larder = self.larder
+        context.supply_facts = self.supply_facts
         context.bindable = self.bindable
         context.discoverable = self.discoverable
         context.conjures = self.conjured_roles
@@ -2810,22 +2828,32 @@ class LiveBody:
             known = census.known
         if not known or pets.FEED_PET not in known:
             return None
-        food = pets.to_buy(pets.family_of(pet.entry), pet.level, self._sold_in_box())
+        food = pets.to_buy(pets.family_of(pet.entry), pet.level,
+                          self._sold_in_box(state.pos.zone_id))
         return food.entry if food is not None else None
 
-    def _sold_in_box(self) -> frozenset[int]:
-        """Every item a merchant standing in the measured zone's map box sells, once a box: read
-        from the policy's thread, so nothing of the body's own readers (`_in_zone`)."""
+    def _sold_in_box(self, zone_id: int | None = None) -> frozenset[int]:
+        """Items sold in the guide frame or the observed current zone, as `_in_zone` shops.
+
+        The observer supplies the zone id: no capture from the policy thread. A guide can
+        keep Azuremyst coordinates while the character shops in Bloodmyst; using only the
+        guide's food IDs excluded Little Azimi after the policy selected her nearby shop.
+        """
         bounds = self.client.bounds
         if bounds is None:
             return frozenset()
+        boxes = [bounds]
+        actual = (getattr(self.client, "coordinate_zones", None) or {}).get(zone_id)
+        if actual is not None and actual != bounds and actual.map_id == bounds.map_id:
+            boxes.append(actual)
         kept = self.__dict__.setdefault("_sold", {})
-        key = (bounds.map_id, bounds.area_id, bounds.left, bounds.top)
+        key = tuple((b.map_id, b.area_id, b.left, b.right, b.top, b.bottom) for b in boxes)
         if key not in kept:
             kept[key] = frozenset(
                 item for m in merchants(bounds.map_id)
-                if (point := world_to_map(*m.world[:2], bounds)) is not None
-                and all(0 <= value <= 1 for value in point) for item in m.items)
+                if any((point := world_to_map(*m.world[:2], box)) is not None
+                       and all(0 <= value <= 1 for value in point) for box in boxes)
+                for item in m.items)
         return kept[key]
 
     def _with_pet_food(self, supplies: tuple, state: State) -> tuple:
@@ -3440,6 +3468,7 @@ class LiveBody:
         near = buying and own_rule(getattr(self.arm, "rule", None) or "") == "service.provisions"
         if buying:
             self._take_larder(values)        # the bags as they are, not as the strip counts them
+            self.policy_context.observe_supplies(state)
         level = values.get("char.level")
         level = level if isinstance(level, int) else None
         rows = self._larder_rows
@@ -3461,7 +3490,8 @@ class LiveBody:
         food = set()
         if buying and not ammo:
             for role in (self._low_roles(values) if near else empty):
-                food |= self._provision_items(role, level, best=role not in empty)
+                food |= self._provision_items(role, level, best=role not in empty,
+                                             zone_id=values.get("pos.zone_id"))
         if buying and not (ammo or pet or food):
             if empty and not near:
                 # None in the zone sells what the empty roles eat (V292, V302).
@@ -3692,7 +3722,7 @@ class LiveBody:
         rows = self._larder_rows or {}
         level = values.get("char.level")
         level = level if isinstance(level, int) else None
-        sold = self._sold_in_box()
+        sold = self._sold_in_box(values.get("pos.zone_id"))
         out = []
         for role in self._provision_roles(values):
             tier = best_tier(role, level, sold)
@@ -3701,13 +3731,13 @@ class LiveBody:
         return out
 
     def _provision_items(self, role: str, level: int | None, *, best: bool,
-                         anywhere: bool = False) -> set[int]:
+                         anywhere: bool = False, zone_id: int | None = None) -> set[int]:
         """The food or drink of `role` a character of `level` may use that a merchant in the
         measured zone's box sells (`anywhere`: in the catalog at all); `best`, of the best tier
         sold there alone (V550)."""
         from jev.world.vendor import best_tier
 
-        sold = set(provisions()) if anywhere else self._sold_in_box()
+        sold = set(provisions()) if anywhere else self._sold_in_box(zone_id)
         level = level if isinstance(level, int) else 1
         items = {item for item, p in provisions().items()
                  if item in sold and p.role in (role, "both")

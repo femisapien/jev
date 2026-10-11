@@ -20,6 +20,7 @@ control loop are drawn too (`pace`), so no action lands on a fixed cadence.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import random
 import string
 import time
@@ -113,7 +114,7 @@ class Humaniser:
     @staticmethod
     def for_client(client_id: str, seed: int | None = None) -> Humaniser:
         """Deterministic per client, so a replay reproduces its own timing."""
-        h = abs(hash(client_id)) % 1000
+        h = int.from_bytes(hashlib.sha256(client_id.encode("utf-8")).digest()[:8], "big")
         return Humaniser(rng=random.Random(seed if seed is not None else h),
                          stagger_ms=(h % 10) * 7.0)
 

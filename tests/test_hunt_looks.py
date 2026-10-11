@@ -111,7 +111,7 @@ class _World:
 
 
 def _hunt(world: _World, *, need: int = 1, looked: Looked | None = None) -> Hunt:
-    h = Hunt(fight=world.fight(), rest=_Rest(), read=lambda: {}, approach=world.approach,
+    h = Hunt(fight=world.fight(), rest=_Rest(), read=lambda: {"vitals.hp": 1.0, "vitals.combat": False}, approach=world.approach,
              progress=lambda: (len(world.kills), need), say=lambda _s: None)
     h.clock, h.where, h.looked = world.clock, world.where, looked
     return h

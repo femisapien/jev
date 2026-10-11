@@ -120,7 +120,7 @@ def _hunt(walked, fights=None):
                             killed_name_id=None, top_up=lambda *a, **k: True, top_ups=0,
                             top_ups_landed=0)
     rest = SimpleNamespace(until=lambda *a, **k: Rested.HEALTHY, detail="")
-    return Hunt(fight=fight, rest=rest, read=lambda: {}, approach=lambda p, **k:
+    return Hunt(fight=fight, rest=rest, read=lambda: {"vitals.hp": 1.0, "vitals.combat": False}, approach=lambda p, **k:
                 walked.append(tuple(p)) or True, progress=lambda: (0, 8), say=lambda s: None)
 
 

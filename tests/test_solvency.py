@@ -281,7 +281,7 @@ def test_the_body_says_a_weapon_is_broken_as_the_fight_read_it_or_by_the_class()
 def test_a_hunt_takes_no_pull_while_the_repair_comes_first():
     fight = SimpleNamespace(run=Mock(), top_up=lambda *a, **k: False, top_ups=0)
     rest = SimpleNamespace(until=lambda *a, **k: None, detail="")
-    hunt = Hunt(fight=fight, rest=rest, read=lambda: {"vitals.combat": False},
+    hunt = Hunt(fight=fight, rest=rest, read=lambda: {"vitals.combat": False, "vitals.hp": 1.0},
                 approach=lambda *a, **k: True, progress=lambda: (0, 5), say=lambda s: None)
     hunt.pull_refused = lambda values: "equipment is broken"
     assert hunt.run((0.0, 0.0, 0.0), 30.0, None) is Hunted.SERVICE_NEEDED

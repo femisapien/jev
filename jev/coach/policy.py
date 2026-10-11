@@ -28,6 +28,8 @@ always usable on its own.
 from __future__ import annotations
 
 import math
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -416,7 +418,8 @@ class Context:
 
     def restocked(self) -> None:
         """Supplies bought: the purse pays for them again."""
-        if self.supplies_blocked or self.supplies_needed is not None:
+        if self.supplies_blocked or self.supplies_needed is not None or self.supplies_noted:
+            self.supplies_noted = None
             self.supplies_blocked, self.supplies_money, self.supplies_needed = False, None, None
             self._save()
 
@@ -441,7 +444,7 @@ class Context:
              "repair_unreachable_step", "supplies_unreachable_step", "bags_unreachable_step",
              "repair_unreachable_until", "supplies_unreachable_until", "bags_unreachable_until",
              "service_failed_at", "service_failures", "step_wait_until", "step_wait_why",
-             "step_failures", "sick_until")
+             "step_failures", "sick_until", "supplies_noted", "supplies_evidence")
 
     def purse(self) -> dict:
         return {name: (dict(value) if isinstance(value := getattr(self, name), dict) else value)
@@ -450,7 +453,9 @@ class Context:
     def restore_purse(self, raw: dict) -> None:
         for name in self.PURSE:
             value = raw.get(name)
-            if name == "sick_until":
+            if name in ("supplies_noted", "supplies_evidence"):
+                setattr(self, name, value if isinstance(value, str) else None)
+            elif name == "sick_until":
                 self.sick_until = (float(value) if isinstance(value, (int, float))
                                    and not isinstance(value, bool) else 0.0)
             elif name == "step_wait_why":
@@ -490,17 +495,46 @@ class Context:
     # character out of all it eats and drinks with its gear broken (`stranded`) is asked past a
     # merchant too far: for it the cap does not hold.
     supplies_noted: str | None = None
+    supplies_evidence: str | None = None
+    supply_facts: Callable[[State], object] | None = None
+
+    def observe_supplies(self, state: State) -> None:
+        """A failed request stays failed across ticks and sessions until its facts change.
+
+        Time and guide step are deliberately absent. Moving to a new shopping area, a
+        changed inventory or purse, or new merchant evidence can make a new request useful.
+        """
+        facts = [state.char.cls, state.char.race, state.char.level, state.pos.zone_id,
+                 state.pos.coord_zone_id,
+                 tuple(None if v is None else math.floor(v * 100)
+                       for v in (state.pos.mx, state.pos.my)),
+                 {k: getattr(state.bags, k) for k in (
+                     "money_copper", "free", "food_id", "food_count", "drink_id",
+                     "drink_count", "inventory_revision")}]
+        if self.supply_facts is not None:
+            try:
+                facts.append(self.supply_facts(state))
+            except Exception:
+                return  # losing a reading is not evidence that a failed request will work
+        key = hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()
+        if key != self.supplies_evidence:
+            if self.supplies_evidence is not None:
+                self.supplies_noted = None
+            self.supplies_evidence = key
+            self._save()
 
     def supplies_out_of_reach(self, code: str) -> None:
         self.supplies_noted = code
+        self._save()
 
     def can_restock(self, money: int | None, step_id: str | None = None, *,
-                    stranded: bool = False, now: float | None = None) -> bool:
+                    stranded: bool = False, now: float | None = None,
+                    near: bool = False) -> bool:
         if self._barred("supplies", step_id, now):
             return False
         # Or one walked for that sold nothing the purse or the bags could take (V550).
         if self.supplies_noted in ("no_supplier", "nothing_sold") or (
-                self.supplies_noted == "too_far" and not stranded):
+                self.supplies_noted == "too_far" and not (stranded or near)):
             return False
         if not self.supplies_blocked:
             return True
@@ -802,6 +836,8 @@ def services(state: State, *, context: Context | None = None) -> list[Plan]:
     """Every service due now, the most urgent first (`service` is the first): what the coach's
     model chooses among (`jev.coach.judge`), where the floor takes only the first."""
     plans: list[Plan] = []
+    if context is not None:
+        context.observe_supplies(state)
 
     def due(plan: Plan) -> None:
         # Nor one that failed within `SERVICE_RETRY_MIN_S`, whoever would pick it (V315).
@@ -933,7 +969,8 @@ def services(state: State, *, context: Context | None = None) -> list[Plan]:
     # purse food may spend. Not held by the session's "too far" (V302), which is for the long
     # walk out of food: the merchant here is near.
     if (larder is not None and larder.near and not hurt
-            and not context._barred("supplies", state.guide.step_id, state.t)
+            and context.can_restock(b.money_copper, state.guide.step_id,
+                                    now=state.t, near=True)
             and larder.near_price is not None
             and ((left := spare()) is None
                  or left * PROVISIONS_SHARE >= NEAR_PURCHASES * larder.near_price)):
@@ -949,7 +986,8 @@ def services(state: State, *, context: Context | None = None) -> list[Plan]:
     # of 65-135. The rest to the fill keeps the reserve (`LiveBody._ammo_supply`).
     price = context._asked("ammo_low", state, None) if context is not None else None
     if (price is not None and not hurt
-            and not context._barred("supplies", state.guide.step_id, state.t)
+            and context.can_restock(b.money_copper, state.guide.step_id,
+                                    now=state.t, near=True)
             and (b.money_copper is None or b.money_copper >= price)):
         due(Plan(_d(Intent.SERVICE, "BUY_AMMO_REAGENT_FOOD", "ammunition is running low", 0.8,
                     ("dead", "combat"), service="supplies"), True, "service.ammo"))

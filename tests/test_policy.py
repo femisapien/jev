@@ -433,9 +433,9 @@ def test_a_supply_out_of_reach_is_not_asked_for_again_this_session():
     assert not asks(bags(1.0, 0), context), "noted: not on this step, nor any other"
     assert not context.can_restock(500, "another step")
     assert asks(bags(0.0, 0), context), "out of both with broken gear: the cap does not hold"
-    assert not asks(bags(0.0, 3), context), "water left: not stranded"
+    assert asks(bags(0.0, 3), context), "changed inventory warrants one new check"
     context.supplies_out_of_reach("no_supplier")
-    assert not asks(bags(0.0, 0), context), "none sold in the zone: no walk would find one"
+    assert not asks(bags(0.0, 3), context), "unchanged failed request remains suppressed"
     assert Context().can_restock(500), "the next session asks again"
     conjuring = Context()
     conjuring.conjures = lambda: frozenset({"drink"})

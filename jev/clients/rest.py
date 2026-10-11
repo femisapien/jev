@@ -19,6 +19,7 @@ button and waiting for health that is never coming.
 from __future__ import annotations
 
 import time
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -169,13 +170,21 @@ class Rest:
                       "vitals.hp", "vitals.power", "vitals.combat", "bars.usable")})
             if v is None:
                 return Rested.BLIND
-            short = [r for r, mark in marks.items()
-                     if (v.get(gauges[r]) is not None and v.get(gauges[r]) < mark)]
-            if not short:
-                return Rested.HEALTHY
             if v.get("vitals.combat") is True:
                 self.detail = "in combat; not a moment to eat"
                 return Rested.INTERRUPTED
+            for role in marks:
+                value = v.get(gauges[role])
+                if (isinstance(value, bool) or not isinstance(value, (int, float))
+                        or not math.isfinite(value) or not 0 <= value <= 1):
+                    self.detail = f"{gauges[role]} is unread; recovery is not confirmed"
+                    return Rested.BLIND
+            if v.get("vitals.dead") is True or v.get("vitals.ghost") is True:
+                self.detail = "dead or a ghost; recovery was interrupted"
+                return Rested.INTERRUPTED
+            short = [r for r, mark in marks.items() if v[gauges[r]] < mark]
+            if not short:
+                return Rested.HEALTHY
             now = time.monotonic()
             for role in short:
                 level = v.get(gauges[role])

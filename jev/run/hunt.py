@@ -354,6 +354,7 @@ class Hunt:
     clock: Callable[[], float] = time.monotonic
     resumed: bool = field(default=False, init=False)
     _found: bool = field(default=False, init=False)
+    _readiness_unknown: bool = field(default=False, init=False)
 
     kills: int = field(default=0, init=False)
     _outdoors: bool | None = field(default=None, init=False)
@@ -590,6 +591,9 @@ class Hunt:
             # is how a run reported `top up 0` and died without killing anything.
             # The pass's reading, when it walked nowhere since (V338).
             if not self._ready_to_pull(None if walked else v):
+                if self._readiness_unknown:
+                    self.detail = "required pull vitals are unread; wait for a fresh observation"
+                    return Hunted.BLIND
                 self.detail = "too hurt to pull, and nothing left to fix it with"
                 return Hunted.NO_FOOD
             if self.pull_refused is not None and (reason := self.pull_refused(v)):
@@ -798,13 +802,23 @@ class Hunt:
         how a character arrives at a kobold already half dead. `values`, a reading just
         taken, is looked at instead of another (V338).
         """
+        self._readiness_unknown = False
         v = values if values is not None else self.read()
         if v is None:
-            return True                      # unreadable is not a reason to stand still
+            self._readiness_unknown = True
+            return False                     # the next bounded hunt tick can read again
+        if v.get("vitals.dead") is True or v.get("vitals.ghost") is True:
+            return False
         if v.get("vitals.combat") is True:
             return True                      # already in it; Fight decides
         # A caster's mana is its damage: below its line it drinks before the pull (V164).
         mana = v.get("vitals.power")
+        caster = (for_class(v.get("char.class_id"), v.get("char.race_id")).caster
+                  and v.get("vitals.power_type") in (0, None))
+        if caster and (isinstance(mana, bool) or not isinstance(mana, (int, float))
+                       or not math.isfinite(mana) or not 0 <= mana <= 1):
+            self._readiness_unknown = True
+            return False
         if (for_class(v.get("char.class_id"), v.get("char.race_id")).caster
                 and v.get("vitals.power_type") in (0, None)             # 0: mana
                 and isinstance(mana, (int, float))
@@ -815,13 +829,32 @@ class Hunt:
                      + (f" - {self.rest.detail}" if self.rest.detail else ""))
             if drank is Rested.INTERRUPTED:
                 return True                  # something is hitting us; fight it
+            if drank is Rested.BLIND:
+                self._readiness_unknown = True
+                return False
             if self.conjure is not None:
                 self.conjure()
-            v = self.read() or v
+            v = self.read()
+            if v is None:
+                self._readiness_unknown = True
+                return False
+            if v.get("vitals.combat") is True:
+                return True
+            mana = v.get("vitals.power")
+            if (isinstance(mana, bool) or not isinstance(mana, (int, float))
+                    or not math.isfinite(mana) or not 0 <= mana <= 1):
+                self._readiness_unknown = True
+                return False
+            if mana < rest_mana(True):
+                return False
         if hasattr(self.fight, "buff_up"):
             self.fight.buff_up()              # a caster's lasting buffs, before the pull (V176)
         hp = v.get("vitals.hp")
-        if hp is None or hp >= PULL_LINE:
+        if (isinstance(hp, bool) or not isinstance(hp, (int, float))
+                or not math.isfinite(hp) or not 0 <= hp <= 1):
+            self._readiness_unknown = True
+            return False
+        if hp >= PULL_LINE:
             return True
 
         if self._top_up():

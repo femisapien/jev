@@ -61,7 +61,7 @@ def _hunt(outcomes, counts, rest=None, approach=None):
         return c
 
     walked = []
-    return Hunt(fight=_Fight(outcomes), rest=rest or _Rest(), read=lambda: {},
+    return Hunt(fight=_Fight(outcomes), rest=rest or _Rest(), read=lambda: {"vitals.hp": 1.0, "vitals.combat": False},
                 approach=approach or (lambda p: walked.append(p) or True),
                 progress=progress, say=lambda _s: None), walked
 
@@ -86,7 +86,7 @@ def test_stations_work_outward_from_the_node_and_stay_on_the_disk():
 
 def test_full_bags_yield_before_another_pull_without_walking_the_camp():
     hunt, walked = _hunt([Fought.KILLED], [(0, 8)])
-    hunt.read = lambda: {"bags.free": 0, "vitals.combat": False}
+    hunt.read = lambda: {"bags.free": 0, "vitals.combat": False, "vitals.hp": 1.0}
     assert hunt.run((0, 0, 0), 30) is Hunted.BAGS_FULL
     assert hunt.fight.calls == 0 and walked == []
 
@@ -95,14 +95,14 @@ def test_full_bags_the_merchant_cannot_help_do_not_stop_the_hunt():
     """V217: with the bag service blocked (nothing a merchant buys), the hunt fought on; before,
     session 186 handed the step back 583 times in a row until the watchdog failed it over."""
     hunt, walked = _hunt([Fought.KILLED], [(0, 1), (0, 1), (1, 1)])
-    hunt.read = lambda: {"bags.free": 0, "vitals.combat": False}
+    hunt.read = lambda: {"bags.free": 0, "vitals.combat": False, "vitals.hp": 1.0}
     asked = []
     hunt.service_needed = lambda: asked.append(1) and None
     hunt.loot = SimpleNamespace(run=lambda **_: Looted.BAGS_FULL, detail="bags are full")
     assert hunt.run((0, 0, 0), 30) is Hunted.DONE, "fought on past a corpse it could not loot"
     assert hunt.fight.calls >= 1 and asked
     hunt, _ = _hunt([Fought.KILLED], [(0, 8)])
-    hunt.read = lambda: {"bags.free": 0, "vitals.combat": False}
+    hunt.read = lambda: {"bags.free": 0, "vitals.combat": False, "vitals.hp": 1.0}
     hunt.service_needed = lambda: "bags are nearly full"
     assert hunt.run((0, 0, 0), 30) is Hunted.SERVICE_NEEDED
     assert hunt.fight.calls == 0 and hunt.detail == "bags are nearly full"
@@ -113,7 +113,7 @@ def test_full_bags_do_not_interrupt_an_existing_fight_or_hide_completion():
     hunt.read = lambda: {"bags.free": 0, "vitals.combat": True}
     assert hunt.run((0, 0, 0), 30) is Hunted.DONE
     assert hunt.fight.calls == 1
-    hunt.read = lambda: {"bags.free": 0, "vitals.combat": False}
+    hunt.read = lambda: {"bags.free": 0, "vitals.combat": False, "vitals.hp": 1.0}
     assert hunt.run((0, 0, 0), 30) is Hunted.DONE
     assert hunt.fight.calls == 1
 
@@ -600,7 +600,7 @@ def test_a_caster_drinks_before_the_pull_and_a_paladin_does_not():
         asked.clear()
         hunt, _ = _hunt([], [(0, 8)], rest=Rest())
         hunt.read = lambda class_id=class_id: {
-            "vitals.combat": False, "vitals.hp": 1.0, "vitals.power": 0.4,
+            "vitals.combat": False, "vitals.hp": 1.0, "vitals.power": .95 if asked else .4,
             "vitals.power_type": 0, "char.class_id": class_id, "char.race_id": 1}
         assert hunt._ready_to_pull() is True
         assert asked == expected, class_id
@@ -729,7 +729,7 @@ def test_a_hunt_pass_reads_once_between_fights():
 
     h, _ = _hunt([], [(0, 1)])
     h.fight = Counting([Fought.NO_TARGET, Fought.KILLED, Fought.NO_TARGET])
-    h.read = lambda: reads.append(1) or {"char.level": 5 + h.kills}
+    h.read = lambda: reads.append(1) or {"char.level": 5 + h.kills, "vitals.hp": 1.0}
     h.progress = lambda: pytest.fail("read again for the counter")
     h.observe = lambda v: (v.get("char.level"), 6, v.get("char.level", 0) >= 6)
     h.sleep = lambda seconds: None
