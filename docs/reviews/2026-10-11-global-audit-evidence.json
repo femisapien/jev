@@ -1,0 +1,1092 @@
+{
+  "source_commits": {
+    "/home/ash/ForeverV2": "8d39836c8e31727acb928765a843a56585bc803d",
+    "/home/ash/ForeverV2-global-audit": "35ba9fdd2690b22fea400d3f36aae81663d0b3f3",
+    "/home/ash/JevHive": "f1da2bee184f954c972b55c340080d00c8aca609"
+  },
+  "current": {
+    "since": 1791691200.0,
+    "until": 1791702000.0,
+    "runs": 2893,
+    "bots": 227,
+    "headline": {
+      "hours": 624.9987125524855,
+      "xp_h": 2183.6940982264628,
+      "deaths_h": 3.595207405825342,
+      "kills_h": 28.259258211698796,
+      "handed_h": 0.664001367787057,
+      "quest_xp_share": 14.518620228809077,
+      "fight_quest_share": 20.92785955407765
+    },
+    "cat": {
+      "fight": 469218.8799999996,
+      "idle": 393663.5000000167,
+      "service": 165193.42999999967,
+      "search": 129301.40999999153,
+      "loot": 58082.69999999986,
+      "rest": 257606.5699999988,
+      "approach": 454457.8999999993,
+      "travel": 117115.64999999902,
+      "quest": 1656.9900000000014,
+      "session": 8263.295188941942,
+      "dead": 195434.5500000013,
+      "other": 0.49
+    },
+    "total_s": 2249995.365188948,
+    "groups": {
+      "band:11-15": {
+        "cat": {
+          "fight": 111986.89999999997,
+          "idle": 101254.36999999887,
+          "service": 55408.75000000006,
+          "search": 23686.92999999975,
+          "loot": 14523.529999999984,
+          "rest": 57278.82000000008,
+          "approach": 106941.42999999985,
+          "quest": 488.84999999999985,
+          "travel": 45417.01,
+          "session": 2068.902372608185,
+          "dead": 35231.29999999978
+        },
+        "xp": 371212.0,
+        "n": {
+          "deaths": 531,
+          "handed": 110,
+          "xp_kill": 298670.0,
+          "kills": 4636,
+          "xp_other": 7725.0,
+          "zero": 492,
+          "xp_quest": 64817.0
+        }
+      },
+      "cls:priest": {
+        "cat": {
+          "fight": 75910.63000000008,
+          "search": 12638.570000000213,
+          "approach": 55571.209999999955,
+          "idle": 54681.41999999999,
+          "rest": 41965.74999999999,
+          "travel": 10874.58000000001,
+          "loot": 7872.700000000001,
+          "service": 16951.76000000001,
+          "session": 66.80000000000004,
+          "dead": 25034.569999999905,
+          "quest": 131.07999999999996
+        },
+        "xp": 160938.0,
+        "n": {
+          "deaths": 363,
+          "handed": 39,
+          "xp_kill": 128494.0,
+          "kills": 1924,
+          "zero": 252,
+          "xp_quest": 28322.0,
+          "xp_other": 4122.0
+        }
+      },
+      "coach:local": {
+        "cat": {
+          "fight": 244954.45999999924,
+          "idle": 178650.58000000057,
+          "service": 89893.6899999999,
+          "search": 79180.11999999873,
+          "loot": 31480.59000000005,
+          "rest": 137025.93999999936,
+          "approach": 228898.46999999986,
+          "session": 343.39999999999833,
+          "travel": 61996.170000000064,
+          "dead": 69997.64999999988,
+          "quest": 877.7199999999996,
+          "other": 0.26
+        },
+        "xp": 738510.0,
+        "n": {
+          "deaths": 1016,
+          "handed": 243,
+          "xp_kill": 615945.0,
+          "kills": 9693,
+          "xp_other": 12079.0,
+          "zero": 1051,
+          "xp_quest": 110486.0
+        }
+      },
+      "band:16-20": {
+        "cat": {
+          "idle": 237202.88000000198,
+          "rest": 153487.85999999935,
+          "search": 73199.23999999925,
+          "approach": 240642.9799999999,
+          "fight": 231342.70999999988,
+          "loot": 26236.74999999998,
+          "travel": 31585.859999999826,
+          "service": 78436.18000000004,
+          "dead": 116635.16999999856,
+          "session": 3698.711580944062,
+          "quest": 284.6900000000002
+        },
+        "xp": 610454.0,
+        "n": {
+          "handed": 70,
+          "xp_kill": 540172.0,
+          "kills": 7440,
+          "deaths": 1349,
+          "zero": 1312,
+          "xp_quest": 61617.0,
+          "xp_other": 8665.0
+        }
+      },
+      "cls:warrior": {
+        "cat": {
+          "idle": 92381.2599999996,
+          "fight": 73717.64000000012,
+          "loot": 7132.39000000001,
+          "search": 15584.390000000261,
+          "approach": 90106.64000000009,
+          "rest": 20864.480000000018,
+          "service": 31387.86999999994,
+          "session": 97.1500000000001,
+          "travel": 20102.529999999988,
+          "dead": 25809.789999999895,
+          "quest": 131.54000000000005
+        },
+        "xp": 208801.0,
+        "n": {
+          "handed": 55,
+          "xp_kill": 174593.0,
+          "kills": 2938,
+          "xp_other": 3348.0,
+          "deaths": 418,
+          "xp_quest": 30860.0,
+          "zero": 305
+        }
+      },
+      "cls:hunter": {
+        "cat": {
+          "idle": 62358.41999999998,
+          "service": 27608.999999999978,
+          "rest": 34270.80999999996,
+          "search": 14657.810000000216,
+          "approach": 49003.16000000006,
+          "fight": 50636.91999999999,
+          "loot": 5168.839999999998,
+          "travel": 14224.71000000001,
+          "dead": 43193.36999999995,
+          "session": 127.0300000000001,
+          "quest": 103.18,
+          "other": 0.49
+        },
+        "xp": 130317.0,
+        "n": {
+          "handed": 29,
+          "xp_kill": 119875.0,
+          "kills": 1804,
+          "deaths": 306,
+          "zero": 232,
+          "xp_other": 1082.0,
+          "xp_quest": 9360.0
+        }
+      },
+      "cls:paladin": {
+        "cat": {
+          "fight": 49679.00999999998,
+          "search": 7492.280000000093,
+          "loot": 4355.120000000002,
+          "service": 15532.870000000019,
+          "idle": 22763.030000000006,
+          "quest": 224.81999999999996,
+          "travel": 18456.380000000005,
+          "approach": 32974.43000000001,
+          "dead": 18248.940000000013,
+          "rest": 10910.220000000001,
+          "session": 65.28
+        },
+        "xp": 181871.0,
+        "n": {
+          "xp_kill": 134028.0,
+          "kills": 2017,
+          "handed": 90,
+          "xp_other": 3550.0,
+          "deaths": 117,
+          "xp_quest": 44293.0,
+          "zero": 182
+        }
+      },
+      "band:06-10": {
+        "cat": {
+          "fight": 99948.28,
+          "loot": 13692.350000000006,
+          "idle": 50698.739999999896,
+          "search": 28379.33999999963,
+          "approach": 94506.75999999998,
+          "rest": 38710.32000000008,
+          "travel": 31423.57999999994,
+          "service": 26030.60999999997,
+          "dead": 42301.14000000001,
+          "quest": 647.3900000000003,
+          "session": 1103.517661933899,
+          "other": 0.37
+        },
+        "xp": 288894.0,
+        "n": {
+          "xp_kill": 235521.0,
+          "kills": 4309,
+          "handed": 121,
+          "xp_other": 5990.0,
+          "deaths": 340,
+          "xp_quest": 47383.0,
+          "zero": 121
+        }
+      },
+      "cls:rogue": {
+        "cat": {
+          "fight": 68087.54000000001,
+          "loot": 6340.479999999993,
+          "idle": 74058.22999999984,
+          "rest": 28400.749999999913,
+          "search": 14008.550000000321,
+          "approach": 86858.22000000007,
+          "service": 20945.979999999974,
+          "dead": 29534.039999999906,
+          "session": 121.08000000000001,
+          "travel": 12082.560000000025,
+          "quest": 263.23999999999995
+        },
+        "xp": 179338.0,
+        "n": {
+          "xp_kill": 157591.0,
+          "kills": 2555,
+          "handed": 52,
+          "deaths": 415,
+          "xp_other": 3095.0,
+          "zero": 308,
+          "xp_quest": 18652.0
+        }
+      },
+      "coach:jev": {
+        "cat": {
+          "fight": 224264.4199999998,
+          "loot": 26602.109999999997,
+          "idle": 215012.92000000103,
+          "approach": 225559.4299999992,
+          "search": 50121.2900000001,
+          "travel": 55119.479999999996,
+          "rest": 120580.62999999958,
+          "service": 75299.74000000008,
+          "quest": 779.2699999999998,
+          "dead": 125436.89999999882,
+          "session": 420.139999999999,
+          "other": 0.22999999999999998
+        },
+        "xp": 626296.0,
+        "n": {
+          "xp_kill": 527065.0,
+          "kills": 7969,
+          "handed": 172,
+          "xp_other": 11566.0,
+          "deaths": 1231,
+          "zero": 881,
+          "xp_quest": 87665.0
+        }
+      },
+      "cls:shaman": {
+        "cat": {
+          "search": 20686.679999999975,
+          "approach": 25039.570000000007,
+          "idle": 20565.55999999992,
+          "fight": 43092.719999999965,
+          "loot": 5926.339999999994,
+          "rest": 36414.570000000014,
+          "travel": 11719.800000000014,
+          "dead": 8274.540000000015,
+          "service": 10424.530000000002,
+          "quest": 157.79999999999998,
+          "session": 85.98000000000008
+        },
+        "xp": 115560.0,
+        "n": {
+          "xp_kill": 96954.0,
+          "kills": 1435,
+          "handed": 34,
+          "zero": 170,
+          "deaths": 115,
+          "xp_other": 1460.0,
+          "xp_quest": 17146.0
+        }
+      },
+      "cls:mage": {
+        "cat": {
+          "service": 19871.840000000007,
+          "approach": 54350.95000000006,
+          "search": 20381.1700000001,
+          "travel": 9349.030000000015,
+          "idle": 35520.20999999982,
+          "fight": 44855.00999999999,
+          "loot": 10640.060000000001,
+          "rest": 42605.38000000005,
+          "session": 82.44000000000013,
+          "dead": 19925.019999999986,
+          "quest": 100.34000000000005
+        },
+        "xp": 198456.0,
+        "n": {
+          "handed": 45,
+          "xp_kill": 173338.0,
+          "kills": 2446,
+          "deaths": 261,
+          "zero": 235,
+          "xp_quest": 21990.0,
+          "xp_other": 3128.0
+        }
+      },
+      "cls:druid": {
+        "cat": {
+          "search": 3877.7400000000102,
+          "approach": 14254.319999999992,
+          "fight": 21221.899999999987,
+          "loot": 3671.140000000002,
+          "rest": 15206.170000000011,
+          "idle": 4260.010000000009,
+          "service": 11225.240000000009,
+          "travel": 9676.750000000004,
+          "dead": 1776.1199999999994,
+          "session": 42.05999999999999,
+          "quest": 413.97000000000014
+        },
+        "xp": 61880.0,
+        "n": {
+          "xp_kill": 51044.0,
+          "kills": 899,
+          "handed": 29,
+          "deaths": 44,
+          "zero": 101,
+          "xp_other": 1565.0,
+          "xp_quest": 9271.0
+        }
+      },
+      "cls:warlock": {
+        "cat": {
+          "idle": 27075.35999999985,
+          "service": 11244.340000000013,
+          "session": 75.72000000000003,
+          "rest": 26968.44,
+          "search": 19974.21999999998,
+          "approach": 46299.40000000008,
+          "fight": 42017.510000000024,
+          "loot": 6975.630000000004,
+          "travel": 10629.310000000014,
+          "dead": 23638.15999999996,
+          "quest": 131.01999999999998
+        },
+        "xp": 127645.0,
+        "n": {
+          "handed": 42,
+          "xp_kill": 107093.0,
+          "kills": 1644,
+          "deaths": 208,
+          "zero": 147,
+          "xp_other": 2295.0,
+          "xp_quest": 18257.0
+        }
+      },
+      "band:01-05": {
+        "cat": {
+          "fight": 25940.669999999984,
+          "search": 4035.9000000000374,
+          "loot": 3630.069999999998,
+          "rest": 8127.360000000004,
+          "approach": 12366.730000000003,
+          "idle": 4499.330000000002,
+          "service": 5311.290000000004,
+          "travel": 8689.199999999999,
+          "quest": 236.05999999999995,
+          "session": 1091.2935734558105,
+          "dead": 1266.94,
+          "other": 0.12
+        },
+        "xp": 94246.0,
+        "n": {
+          "xp_kill": 68647.0,
+          "kills": 1277,
+          "handed": 114,
+          "zero": 7,
+          "xp_quest": 24334.0,
+          "deaths": 27,
+          "xp_other": 1265.0
+        }
+      },
+      "band:?": {
+        "cat": {
+          "rest": 2.21,
+          "search": 0.0,
+          "idle": 8.18,
+          "session": 300.86999999999995,
+          "dead": 0.0,
+          "service": 6.6,
+          "fight": 0.32
+        },
+        "xp": 0.0,
+        "n": {
+          "handed": 0
+        }
+      }
+    },
+    "window_local": [
+      "2026-10-11T05:00:00+01:00",
+      "2026-10-11T08:00:00+01:00"
+    ],
+    "units": {
+      "cat": "seconds",
+      "headline.quest_xp_share": "percent",
+      "headline.fight_quest_share": "percent",
+      "headline.*_h": "events or XP per recorded bot-hour"
+    },
+    "category_percent": {
+      "fight": 20.854215402376887,
+      "idle": 17.49619159624171,
+      "service": 7.341945346013067,
+      "search": 5.7467411711371765,
+      "loot": 2.5814586509213653,
+      "rest": 11.449204473288583,
+      "approach": 20.198170495423902,
+      "travel": 5.2051507221733315,
+      "quest": 0.07364415170076817,
+      "session": 0.36725832047427415,
+      "dead": 8.685997892426293,
+      "other": 2.177782263826358e-05
+    },
+    "caution": "Pooled fleet snapshot, including parity shard and both coaches; composition confounds comparisons and raw XP/hour varies by level."
+  },
+  "cache_coverage": {
+    "selected": 3616,
+    "cached": 3616,
+    "fresh": 0,
+    "mode": "existing current-format cache only; no raw runs rewritten"
+  },
+  "route_coverage": {
+    "quest_placements": 5017,
+    "supported_placements": 3331,
+    "supported_before_worthless_filter": 3370,
+    "exclusion_reasons": {
+      "Hogger is an elite; not a solo fight": 6,
+      "quest event requires a measured interaction or route": 139,
+      "prerequisite unavailable earlier in this route": 726,
+      "destination is outside the placed route": 134,
+      "no supported source for quest item 1262": 6,
+      "pays no experience, offers no reward to choose, and no quest needs it": 51,
+      "objective cannot be joined to one of the three painted counters": 54,
+      "requires quest spell 8593; no quest-spell executor": 1,
+      "no supported source for quest item 7206": 1,
+      "no supported source for quest item 7292": 2,
+      "objective destination is outside the race's lands": 1,
+      "no creature spawn for requirement 5676": 4,
+      "quest item 2894 requires purchase; no quest-item purchase executor": 9,
+      "event and counters need painted counter identity": 37,
+      "quest item 2686 requires purchase; no quest-item purchase executor": 9,
+      "Emogg the Crusher is an elite; not a solo fight": 9,
+      "no supported source for quest item 5184": 5,
+      "no supported source for quest item 5639": 5,
+      "no supported source for quest item 5645": 5,
+      "mixed objective families need painted counter identity": 91,
+      "no supported source for quest item 18151": 5,
+      "no creature spawn for requirement 11836": 5,
+      "no supported source for quest item 12349": 5,
+      "objective kind interact has no verified executor": 49,
+      "no supported source for quest item 14339": 5,
+      "no spawned quest turn-in target in the source database": 11,
+      "no creature spawn for requirement 10323": 5,
+      "no supported source for quest item 12355": 5,
+      "no supported source for quest item 7737": 1,
+      "no supported source for quest item 15845": 1,
+      "no creature spawn for requirement 12299": 1,
+      "requires quest spell 28880; no quest-spell executor": 6,
+      "no creature spawn for requirement 16534": 6,
+      "no supported source for quest item 23614": 6,
+      "requires quest spell 31003; no quest-spell executor": 6,
+      "requires quest spell 30877; no quest-spell executor": 6,
+      "no supported source for quest item 23878": 6,
+      "no supported source for quest item 23879": 6,
+      "no supported source for quest item 23880": 6,
+      "no creature spawn for requirement 17715": 6,
+      "no supported source for quest item 24317": 6,
+      "no creature spawn for requirement 17681": 6,
+      "no supported source for quest item 23688": 1,
+      "no creature spawn for requirement 17612": 1,
+      "no supported source for quest item 4904": 11,
+      "requires an active predecessor quest; sequential route cannot hold it": 21,
+      "no supported source for quest item 5023": 15,
+      "no supported source for quest item 5100": 15,
+      "requires quest spell 5316; no quest-spell executor": 15,
+      "no supported source for quest item 5570": 15,
+      "no supported source for quest item 16764": 15,
+      "no supported source for quest item 5101": 15,
+      "no supported source for quest item 7295": 2,
+      "no supported source for quest item 7968": 2,
+      "requires quest spell 20364; no quest-spell executor": 5,
+      "quest item 2320 requires purchase; no quest-item purchase executor": 9,
+      "no creature spawn for requirement 6390": 1,
+      "no creature spawn for requirement 1946": 5,
+      "no supported source for quest item 3622": 5,
+      "no supported source for quest item 4703": 4,
+      "requires quest spell 5206; no quest-spell executor": 4,
+      "quest item 22775 requires purchase; no quest-item purchase executor": 6,
+      "requires quest spell 31614; no quest-spell executor": 6,
+      "no creature spawn for requirement 16364": 6,
+      "no creature spawn for requirement 17716": 1,
+      "Anok'suten is an elite; not a solo fight": 6,
+      "no creature spawn for requirement 16292": 6,
+      "requires quest spell 28451; no quest-spell executor": 6,
+      "no supported source for quest item 24156": 1,
+      "Knucklerot is an elite; not a solo fight": 6,
+      "requires quest spell 29049; no quest-spell executor": 6,
+      "requires quest spell 29517; no quest-spell executor": 6,
+      "Kel'gash the Wicked is an elite; not a solo fight": 6,
+      "Dar'Khan Drathir is an elite; not a solo fight": 6,
+      "no supported source for quest item 23686": 1,
+      "requires quest spell 1243; no quest-spell executor": 1,
+      "no supported source for quest item 23552": 1
+    },
+    "route_files": 52,
+    "readiness_problems": 0,
+    "unit": "Distinct quest IDs within each route, summed across race/class route placements; not globally unique quests"
+  },
+  "sensitivity": {
+    "label": "Exploratory reconstruction, not a replacement trial decision",
+    "window": [
+      1791659580.8516672,
+      1791686214.9191163
+    ],
+    "cached_death_runs": 12950,
+    "normalization_current": {
+      "1": 500.5,
+      "2": 970.0,
+      "3": 1224.0,
+      "4": 2042.5,
+      "5": 3681.0,
+      "6": 4889.5,
+      "7": 6809.5,
+      "8": 8424.0,
+      "9": 10964.0,
+      "10": 12247.0,
+      "11": 14066.0,
+      "12": 16034.0,
+      "13": 18104.0,
+      "14": 18573.0,
+      "15": 20362.0,
+      "16": 22115.0,
+      "17": 24096.0,
+      "18": 26969.0,
+      "19": 30976.5,
+      "20": 33384.0
+    },
+    "normalization_frozen": {
+      "1": 519.0,
+      "2": 979.0,
+      "3": 1287.0,
+      "4": 2095.5,
+      "5": 3795.0,
+      "6": 4987.0,
+      "7": 7222.0,
+      "8": 8607.0,
+      "9": 11279.0,
+      "10": 12497.5,
+      "11": 14734.5,
+      "12": 16489.5,
+      "13": 18599.0,
+      "14": 18811.0,
+      "15": 20769.0,
+      "16": 22521.0,
+      "17": 23546.0,
+      "18": 26178.0,
+      "19": 29573.0,
+      "20": 31871.41968911917
+    },
+    "reconstructed": {
+      "difference": 0.07518797749831241,
+      "interval90": [
+        0.0020436421493843504,
+        0.14202479353198305
+      ],
+      "theta": 0.7939183957452088,
+      "n": [
+        78,
+        96
+      ],
+      "baseline": 0.827941208803967
+    },
+    "frozen_curve": {
+      "difference": 0.0829510470111604,
+      "interval90": [
+        0.008686807609491587,
+        0.13525307449997948
+      ],
+      "theta": 0.7931066417933995,
+      "n": [
+        78,
+        96
+      ],
+      "baseline": 0.8234042722662205
+    },
+    "frozen_no_extra_death_penalty": {
+      "difference": 0.09964184122396547,
+      "interval90": [
+        -0.01499246099820517,
+        0.14850573745654427
+      ],
+      "theta": 0.8014021996050541,
+      "n": [
+        78,
+        96
+      ],
+      "baseline": 0.8936114098409911
+    },
+    "leave_one_shard_out": {
+      "0": {
+        "difference": 0.09007006770077552,
+        "interval90": [
+          -0.0058591610281926165,
+          0.1552858625350395
+        ],
+        "theta": 0.8327199249142822,
+        "n": [
+          55,
+          96
+        ],
+        "baseline": 0.827941208803967
+      },
+      "1": {
+        "difference": 0.06339457506202084,
+        "interval90": [
+          -0.0017572537477208439,
+          0.14377211063633266
+        ],
+        "theta": 0.8056538100109638,
+        "n": [
+          78,
+          79
+        ],
+        "baseline": 0.6899810376266013
+      },
+      "2": {
+        "difference": 0.030171591351625393,
+        "interval90": [
+          -0.03196058577344074,
+          0.13179330870925643
+        ],
+        "theta": 0.8031177800933859,
+        "n": [
+          78,
+          73
+        ],
+        "baseline": 0.8640829297820822
+      },
+      "3": {
+        "difference": 0.0803792580919841,
+        "interval90": [
+          0.00023151622097850044,
+          0.14567412526002887
+        ],
+        "theta": 0.7711350285498834,
+        "n": [
+          78,
+          71
+        ],
+        "baseline": 0.8476355845701619
+      },
+      "4": {
+        "difference": 0.0730809220417552,
+        "interval90": [
+          -0.013507773189199823,
+          0.14829713085982865
+        ],
+        "theta": 0.7961969400443035,
+        "n": [
+          50,
+          96
+        ],
+        "baseline": 0.827941208803967
+      },
+      "5": {
+        "difference": 0.09530548649080184,
+        "interval90": [
+          0.02862429040001835,
+          0.16084326664980952
+        ],
+        "theta": 0.7755275919429432,
+        "n": [
+          78,
+          65
+        ],
+        "baseline": 0.8476355845701619
+      },
+      "6": {
+        "difference": 0.07263656780603833,
+        "interval90": [
+          -0.023065124817822302,
+          0.15188099193020455
+        ],
+        "theta": 0.7754006462682258,
+        "n": [
+          51,
+          96
+        ],
+        "baseline": 0.827941208803967
+      }
+    },
+    "cluster_bootstrap_fixed_adjustment_interval90": [
+      0.016932783328559742,
+      0.1101409236326546
+    ],
+    "cluster_counts": {
+      "candidate": {
+        "6": 27,
+        "0": 23,
+        "4": 28
+      },
+      "control": {
+        "5": 31,
+        "2": 23,
+        "1": 17,
+        "3": 25
+      }
+    }
+  },
+  "probes": {
+    "rest_missing_gauges": "healthy",
+    "rest_missing_mana": "healthy",
+    "hunt_unread_ready_to_pull": true,
+    "supply_can_restock": false,
+    "supply_plans_after_no_supplier": [
+      "service.provisions"
+    ],
+    "supply_plans_after_generic_failure": [],
+    "timing_seed_by_hashseed": {
+      "0": {
+        "gap": 0.032373778583401985,
+        "stagger_ms": 63.0
+      },
+      "1": {
+        "gap": 0.04622851996540101,
+        "stagger_ms": 35.0
+      }
+    }
+  },
+  "provenance": {
+    "asset-fingerprints.json": "10c48660ae939b941f6f3995a3c9b63014f2b3c9d62e1edbfd190da3979949a4",
+    "current.json": "e335a63e18eb15dfa9107fd22a1d7f7a7c344d7b1b556c68d603be79f9ed6f24",
+    "current.txt": "a497cd8baff0cf6ef2e5e2434821d5fbc26cbf3c2fcd3e7c40146becb3880e67",
+    "hive-suite.log": "e591643eeca9f7dcf621b6319ab2826985e706730f25dc421d2f3f8fe85b85ad",
+    "hive-suite.xml": "2da7a66b12b87477c424b8989442502973f544c63eb947bcc2f1ab0d24a0c131",
+    "metrics.py": "5af01c1507744cfd8d7c6d768348bc0eb9db92e811e7ab07615813282d0ab92f",
+    "navmesh-suite.log": "c4b808d34f4db00b333696dec1f3a43a2887d8bfe0cb7af07a3cb98ff43a7830",
+    "navmesh-suite.xml": "8952b1c3016a8b5d5cd9dd4d160953f0fcefe009cf5712167cb6968aa251e9e0",
+    "overnight.json": "446a3ea05c8747dd92d802d659f39c04d391a1ebafe767609d772759f5948e4d",
+    "overnight.txt": "32420f82bb1131624434b8a3f90f2f39e4b8764547dbb47f7b30476e3120b2b5",
+    "probes.json": "12c59125e65d9aaa87f0513cd01001cbc2e9d568d36116e30a9c4358441c6c35",
+    "probes.py": "2622ea6182ec6e9131e8a2f3e38ba4cf0744414f588272cd14d1799d7f2cebee",
+    "routes.json": "98ee3c15b3a8d99a5abf80ec217c32ab0b9f0213d771d6460f9d6786f1a8a338",
+    "runtime-status.txt": "65e3e572b7bd09b4f142ea72e4f0a8105d6514bfe6a2ed0a5e751202b5a72705",
+    "sensitivity.json": "bdcf28e8ffd13e30321c38fc3b2a51b37133b24f717e21c5098f86573ed93358",
+    "sensitivity.py": "5f3471a60ab82aa1432d99c203c32d48c38a7a1eb54bdb7d4cc73c3ce6a0dd45",
+    "shared-suite.log": "5cf580e03c762915d668affd24bc6ba500d92a25c489bb57eef2585436b529e1",
+    "shared-suite.xml": "6f60eef6ae6baa6e5441ee5abb66403a7bfd5cf2f127d3e4aa6d437e2532f38c",
+    "supplier-loop.json": "14416db8e66457a6eee5f5f0e35f4548337dd54d02d9ed7f8412ccd23c387ec2",
+    "trial-verdicts.jsonl": "3610bbe5827823b2f0e16ad9dabebfd58dd3ffe9ec1e4a51eeb38f64f62ac975",
+    "navmesh_sidecar": "5af52ccc9b43ef51f3200d868bbf2945e853306b5f33103c393be914dfa95a81"
+  },
+  "captured_at": "2026-10-11T09:21:13.004834+01:00",
+  "evidence_kind": "Observational audit and diagnostic sensitivity analysis; no new performance trial or live-client run",
+  "validation": {
+    "shared": {
+      "tests": 3271,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 4,
+      "passed": 3267,
+      "seconds": 198.404,
+      "skips": [
+        {
+          "test": "tests.test_path.test_the_navmesh_routes_around_northshire_abbey",
+          "reason": "needs tools/jevpath and extracted mmaps"
+        },
+        {
+          "test": "tests.test_path.test_a_point_off_the_mesh_says_which_end_failed",
+          "reason": "needs tools/jevpath and extracted mmaps"
+        },
+        {
+          "test": "tests.test_path.test_an_unreachable_destination_is_partial_not_complete",
+          "reason": "needs tools/jevpath and extracted mmaps"
+        },
+        {
+          "test": "tests.test_path.test_routes_keep_to_ground_a_character_can_climb",
+          "reason": "needs tools/jevpath and extracted mmaps"
+        }
+      ]
+    },
+    "hive": {
+      "tests": 397,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 7,
+      "passed": 390,
+      "seconds": 267.767,
+      "skips": [
+        {
+          "test": "tests.test_learning.test_the_server_body_holds_the_learned_lines_and_the_keyed_heal_line_as_it_strays",
+          "reason": "the Jev played has no learned lines (V445)"
+        },
+        {
+          "test": "tests.test_pullrisk.test_the_table_is_read_by_jevs_own_reader_as_hive_run_lends_it",
+          "reason": "could not import 'jev.learn.risks': No module named 'jev.learn.risks'"
+        },
+        {
+          "test": "tests.test_skills.test_a_look_ranks_its_units_by_the_pull_risk_table_as_the_live_look_does",
+          "reason": "could not import 'jev.learn.risks': No module named 'jev.learn.risks'"
+        },
+        {
+          "test": "tests.test_weapon_masters.test_woo_ping_teaches_the_two_handed_swords_the_body_asked_for[parts0]",
+          "reason": "a Jev from before V593 has no weapon masters"
+        },
+        {
+          "test": "tests.test_weapon_masters.test_woo_ping_teaches_the_two_handed_swords_the_body_asked_for[parts1]",
+          "reason": "a Jev from before V593 has no weapon masters"
+        },
+        {
+          "test": "tests.test_weapon_masters.test_a_short_purse_buys_none[parts0]",
+          "reason": "a Jev from before V593 has no weapon masters"
+        },
+        {
+          "test": "tests.test_weapon_masters.test_a_short_purse_buys_none[parts1]",
+          "reason": "a Jev from before V593 has no weapon masters"
+        }
+      ]
+    },
+    "navmesh": {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 4,
+      "seconds": 10.123,
+      "skips": []
+    },
+    "total_unique_passed": 3661,
+    "remaining_skips": 7,
+    "notes": [
+      "Shared full suite initially skipped four navmesh cases; all four passed separately with the existing built sidecar and extracted mmaps.",
+      "Hive skips concern capabilities not implemented in the accepted shared baseline.",
+      "All 52 route files passed static readiness checks; this does not establish in-game completion.",
+      "Generated 198 addon fields locally; no addon installed and no Windows/game input."
+    ]
+  },
+  "supplier_loop": {
+    "run": "var/runs/20261011T051730-09cc38",
+    "counts": {
+      "aborted": 1763
+    },
+    "examples": [
+      {
+        "run_id": "20261011T051730-09cc38",
+        "client_id": "hive-944",
+        "t": 1791692254.0998642,
+        "tick_id": 10,
+        "skill": "BUY_AMMO_REAGENT_FOOD",
+        "armed_by": "policy",
+        "outcome": "aborted",
+        "duration_s": 0.2503488063812256,
+        "situation_key": "v1|hive_draenei_hunter_1_20.supported|hive_draenei_hunter_1_20_gate_13_bloodmyst_is|age:fresh|d:0|route:on|prog:?|hp:ok|cmb:n|bag:ok|dur:ok|sense:ok",
+        "step_id": "hive_draenei_hunter_1_20_gate_13_bloodmyst_is",
+        "detail": "no generated supplier in the measured zone",
+        "decision_id": "20261011T051730-09cc38:d4",
+        "arm_id": "20261011T051730-09cc38:hive-944:arm4",
+        "rule": "service.provisions",
+        "levels_gained": 0.0,
+        "died": false
+      },
+      {
+        "run_id": "20261011T051730-09cc38",
+        "client_id": "hive-944",
+        "t": 1791692254.6055703,
+        "tick_id": 12,
+        "skill": "BUY_AMMO_REAGENT_FOOD",
+        "armed_by": "policy",
+        "outcome": "aborted",
+        "duration_s": 0.22164463996887207,
+        "situation_key": "v1|hive_draenei_hunter_1_20.supported|hive_draenei_hunter_1_20_gate_13_bloodmyst_is|age:fresh|d:0|route:on|prog:?|hp:ok|cmb:n|bag:ok|dur:ok|sense:ok",
+        "step_id": "hive_draenei_hunter_1_20_gate_13_bloodmyst_is",
+        "detail": "no generated supplier in the measured zone",
+        "decision_id": "20261011T051730-09cc38:d5",
+        "arm_id": "20261011T051730-09cc38:hive-944:arm5",
+        "rule": "service.provisions",
+        "levels_gained": 0.0,
+        "died": false
+      }
+    ],
+    "first_observation": {
+      "char": {
+        "name": null,
+        "key": 683933837,
+        "cls": "hunter",
+        "race": "draenei",
+        "faction": "alliance",
+        "level": 10,
+        "xp_pct": 0.7517105263157895
+      },
+      "pos": {
+        "zone_id": 6586,
+        "coord_zone_id": 3524,
+        "zone": "BloodmystIsle",
+        "sub": null,
+        "mx": 0.4182608318082165,
+        "my": -0.007522333979558495,
+        "raw_mx": 0.652159582183783,
+        "raw_my": 0.9264352843939498,
+        "facing": null,
+        "indoors": false,
+        "corpse_mx": null,
+        "corpse_my": null,
+        "raw_corpse_mx": null,
+        "raw_corpse_my": null,
+        "world": null
+      },
+      "bags": {
+        "free": 4,
+        "durability_min": 0.9,
+        "money_copper": 958,
+        "food_id": 4540,
+        "food_count": 0,
+        "drink_id": 159,
+        "drink_count": 0,
+        "inventory_revision": 12230,
+        "inventory_total": 22,
+        "slot": {
+          "bag": 0,
+          "slot": 4,
+          "item_id": 23759,
+          "count": 1,
+          "quality": 1,
+          "locked": false
+        }
+      },
+      "guide": {
+        "graph_id": "hive_draenei_hunter_1_20.supported",
+        "step_id": "hive_draenei_hunter_1_20_gate_13_bloodmyst_is",
+        "kind": "ding_gate",
+        "age_s": 0.0,
+        "on_route": true,
+        "progress": null,
+        "deaths_on_step": 0,
+        "attempts": 0
+      }
+    }
+  },
+  "fullbag_recorded_verdict": {
+    "at": 1791688914.9191163,
+    "stage": "judge",
+    "branch": "bet-gather-capacity",
+    "commit": "35ba9fdd2690b22fea400d3f36aae81663d0b3f3",
+    "played": "35ba9fdd2690b22fea400d3f36aae81663d0b3f3",
+    "base": "8d39836c8e31727acb928765a843a56585bc803d",
+    "subject": "Bound quest gathering retries when full bags cannot be serviced",
+    "outcome": "kept",
+    "merged": true,
+    "target": {
+      "file": "executions.jsonl",
+      "match": {
+        "operation": "fight",
+        "code": "died"
+      },
+      "direction": "fewer",
+      "decide": "speed"
+    },
+    "checks": {
+      "target": {
+        "ratio": 0.836,
+        "interval": [
+          0.72,
+          0.976
+        ],
+        "pass": true
+      },
+      "speed": {
+        "difference": 0.0775,
+        "interval": [
+          0.0043,
+          0.1395
+        ],
+        "floor": -0.1668,
+        "theta": 0.794,
+        "characters": [
+          78,
+          96
+        ],
+        "pass": true
+      },
+      "deaths": {
+        "ratio": 0.81,
+        "interval": [
+          0.711,
+          0.932
+        ],
+        "limit": 1.25,
+        "pass": true
+      },
+      "idle": {
+        "ratio": 0.917,
+        "interval": [
+          0.708,
+          1.178
+        ],
+        "limit": 1.25,
+        "pass": true
+      },
+      "stuck": {
+        "ratio": 1.165,
+        "interval": [
+          0.935,
+          1.474
+        ],
+        "limit": 1.25,
+        "pass": true
+      }
+    },
+    "characters": [
+      78,
+      97
+    ],
+    "hours": [
+      545.2,
+      662.6
+    ],
+    "target_events": [
+      1108,
+      1611,
+      920,
+      1326
+    ],
+    "left_out": {
+      "candidate": 10,
+      "control": 12
+    },
+    "window": [
+      1791659580.8516672,
+      1791686214.9191163
+    ],
+    "detail": "target a played hour, candidate over control 0.836 (90% [0.720, 0.976]: below 1); speed index difference +0.077 (90% [+0.004, +0.140], floor -0.167: pass); deaths ratio 0.810 (90% [0.711, 0.932], limit 1.25: pass); idle ratio 0.917 (90% [0.708, 1.178], limit 1.25: pass); stuck ratio 1.165 (90% [0.935, 1.474], limit 1.25: pass); 78 and 97 characters, 545.2 and 662.6 played hours; target events 1108 and 1611 (baselines 920 and 1326); left out for too little baseline 10 and 12; hive-findings fast-forwarded to 35ba9fd"
+  },
+  "runtime": {
+    "status_file": "runtime-status.txt",
+    "hive_shared_commit": "35ba9fdd2690b22fea400d3f36aae81663d0b3f3",
+    "live_shared_commit": "8d39836c8e31727acb928765a843a56585bc803d",
+    "stops": {
+      "CYCLES_STOP": true,
+      "AUTOFIX_STOP": true,
+      "PROMOTE_STOP": true
+    },
+    "respawn_status": [
+      "creature: 4587 spawns scaled, factor 1.01-8.00 (mean 1.47)",
+      "gameobject: 2727 spawns scaled, factor 1.00-6.45 (mean 1.46)",
+      "applied 05 Oct 17:42"
+    ]
+  },
+  "artifacts_directory": "/home/ash/JevHive/var/audits/global-2026-10-11"
+}
