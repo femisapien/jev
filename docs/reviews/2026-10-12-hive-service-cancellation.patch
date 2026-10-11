@@ -1,0 +1,62 @@
+From f768eb690243cb4448001b59f2825fda7d7179ff Mon Sep 17 00:00:00 2001
+From: Ash <ashleyrowe1998@gmail.com>
+Date: Mon, 12 Oct 2026 00:38:36 +0100
+Subject: [PATCH] Evaluate flight discovery from supervisor state after
+ cancellation
+
+---
+ hive/body.py         |  7 ++++++-
+ tests/test_parity.py | 15 +++++++++++++++
+ 2 files changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/hive/body.py b/hive/body.py
+index 3368e0e..5b654ba 100644
+--- a/hive/body.py
++++ b/hive/body.py
+@@ -37,6 +37,7 @@ from hive.skills import (
+ )
+ from jev.clients.loot import Loot
+ from jev.guide.coords import map_to_world
++from jev.perceive.radio_frame import RACE_BY_ID
+ from jev.guide.path import LINK_NEAR_YARDS, PathStatus
+ from jev.run.body import FLIGHT_BASE_S, FLIGHT_YARDS_PER_S, LiveBody
+ from jev.world.taxi import FLY_MIN_YARDS
+@@ -296,7 +297,11 @@ class ServerBody(LiveBody):
+             return super().discoverable(state)
+         if _parity(self, "flights"):
+             # Jev's own: a flight master near whose node its memory has not seen.
+-            return _flies(self) and super().discoverable(state)
++            # This is a supervisor question. The worker's reader may already be cancelled;
++            # reading through it here used to terminate the entire farm session.
++            race = getattr(getattr(state, "char", None), "race", None)
++            eligible = (FLY_RACES is None or any(RACE_BY_ID.get(r) == race for r in FLY_RACES))
++            return eligible and super().discoverable(state)
+         return self._known_nodes() is not None and super().discoverable(state)
+ 
+     def _planned_yards(self, start, end) -> float | None:
+diff --git a/tests/test_parity.py b/tests/test_parity.py
+index a0d1a20..6f5e8ab 100644
+--- a/tests/test_parity.py
++++ b/tests/test_parity.py
+@@ -601,3 +601,18 @@ def test_with_parity_the_floor_a_session_ended_on_is_kept_for_the_next():
+     from hive.run import paths_for
+ 
+     assert paths_for(0x1234)["trail"].name == "character-00001234.trail.json"
++
++
++def test_flight_discovery_policy_does_not_read_a_cancelled_worker(monkeypatch):
++    from hive.body import ServerBody
++    from jev.run.body import LiveBody
++    from jev.run.supervisor import Cancelled
++    body = ServerBody.__new__(ServerBody)
++    body.PLANNED_FLIGHTS = False
++    body.client = SimpleNamespace(parity=frozenset({'flights'}))
++    def cancelled():
++        raise Cancelled('playhead changed')
++    body._read = cancelled
++    monkeypatch.setattr(LiveBody, 'discoverable', lambda self, state: True)
++    assert body.discoverable(SimpleNamespace(char=SimpleNamespace(race='human'))) is False
++    assert body.discoverable(SimpleNamespace(char=SimpleNamespace(race='nightelf'))) is True
+-- 
+2.43.0
+
