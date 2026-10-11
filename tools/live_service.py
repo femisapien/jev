@@ -46,7 +46,7 @@ def unit_text(root, python, lock, key, hours):
     final = [python, root / 'tools/live_service.py', 'finalize']
     return '\n'.join([
         '[Unit]', 'Description=Supervised Jev mage test', '', '[Service]',
-        'Type=notify', 'NotifyAccess=main', f'WorkingDirectory={quote(root)}',
+        'Type=notify', 'NotifyAccess=main', f'WorkingDirectory={str(root).replace("%", "%%")}',
         'ExecStart=/usr/bin/env -u WSL_INTEROP ' + ' '.join(map(quote, args)),
         'ExecStopPost=' + ' '.join(map(quote, final)),
         'TimeoutStartSec=120', 'TimeoutStopSec=250', 'WatchdogSec=90',
