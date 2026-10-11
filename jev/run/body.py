@@ -1676,16 +1676,25 @@ class LiveBody:
                                   else self.rest.until(drink_to(caster), role=Role.DRINK),
                                   self.rest.detail)
             self._ate()
-            self._conjure()
-            self.fight.buff_up()
-            return rested
+            return self._prepared_rest(state, rested)
         if self.fight.top_up():
             return Result(SkillOutcome.SUCCEEDED, "health topped up", "healthy")
         rested = self._result(self.rest.until(0.9), self.rest.detail)
         self._ate()
+        return self._prepared_rest(state, rested)
+
+    def _prepared_rest(self, state, rested: Result) -> Result:
+        if rested.outcome is not SkillOutcome.SUCCEEDED:
+            return rested
         self._conjure()
         self.fight.buff_up()
-        return rested
+        # Conjuring and buffing spend the mana that the meal just restored. The live mage
+        # left a successful 97% meal at 25% after six conjures. Confirm readiness after
+        # preparation, including combat/blind/dead interruptions, before returning healthy.
+        outcome = (self.rest.until_both(0.9, drink_to(is_caster(state.char.cls)))
+                   if state.vitals.power_type is PowerType.MANA else self.rest.until(0.9))
+        self._ate()
+        return self._result(outcome, self.rest.detail)
 
     # -- food and drink: kept, on the bar, eaten (V550-V553) ------------------------------
 

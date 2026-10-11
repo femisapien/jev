@@ -577,7 +577,62 @@ def test_a_paladin_short_of_mana_and_hurt_eats_and_drinks_at_once(monkeypatch):
                  vitals=Vitals(hp=0.55, power=0.2, power_type="mana", dead=False, ghost=False,
                                combat=False))
     b._rest(state)
-    assert asked == [("both", 0.9, 0.75)], "V167 did so for a caster alone"
+    assert asked == [("both", 0.9, 0.75), ("both", 0.9, 0.75)], \
+        "eat and drink together, then confirm readiness after preparation"
+
+
+@pytest.mark.parametrize("after_preparation", ["recover", "combat", "blind", "stalled"])
+def test_mage_readiness_is_observed_after_conjuring_and_buffing(monkeypatch, after_preparation):
+    """Live 11 October: a 97% meal spent its mana on supplies, then walked into combat.
+    Exercise the actual rest loop through the body, including failure after preparation.
+    """
+    b = body()
+    values = {"char.class_id": 8, "char.race_id": HUMAN, "vitals.hp": 0.55,
+              "vitals.power": 0.2, "vitals.combat": False, "vitals.dead": False,
+              "vitals.ghost": False, "bars.usable": (1 << 10) | (1 << 11)}
+    prepared = []
+    taps = []
+    now = [0.0]
+
+    def sleep(seconds):
+        now[0] += seconds
+        if not prepared or after_preparation != "stalled":
+            for key in ("vitals.hp", "vitals.power"):
+                values[key] = min(1.0, values[key] + 0.15 * seconds)
+
+    monkeypatch.setattr("jev.clients.rest.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("jev.clients.rest.time.sleep", sleep)
+    for name in ("_clear_of_spawns", "_wear_upgrades", "_stock_bar", "_place_spells",
+                 "_spend_talents", "_bar_profile", "_ate"):
+        monkeypatch.setattr(b, name, lambda: None)
+
+    def conjure():
+        assert values["vitals.power"] >= 0.95
+        values["vitals.power"] = 0.25
+        prepared.append("conjured")
+
+    def buff():
+        values["vitals.power"] -= 0.1
+        if after_preparation == "combat":
+            values["vitals.combat"] = True
+
+    b._conjure = conjure
+    b.fight = SimpleNamespace(buff_up=buff, top_up=lambda: False, profile=None)
+    b.rest = Rest(SimpleNamespace(tap=lambda key: taps.append(key)),
+                  lambda: None if prepared and after_preparation == "blind" else values,
+                  profile=for_class(8, HUMAN))
+    state = seen(char=Char(level=16, cls="mage", race="human"),
+                 vitals=Vitals(hp=0.55, power=0.2, power_type="mana", combat=False))
+    result = b._rest(state)
+    expected = {"recover": "healthy", "combat": "interrupted", "blind": "blind",
+                "stalled": "timeout"}[after_preparation]
+    assert result.code == expected
+    assert prepared == ["conjured"]
+    if after_preparation == "recover":
+        assert values["vitals.power"] >= 0.95
+        assert taps.count("minus") == 2
+    else:
+        assert result.outcome.value != "succeeded"
 
 
 def test_a_walk_for_food_that_buys_nothing_is_not_asked_for_again(monkeypatch):
