@@ -55,7 +55,7 @@ def code(root: str | Path = ROOT) -> dict:
         def git(*args):
             return subprocess.check_output(
                 [*_git_command(root, windows=sys.platform == 'win32'), *args],
-                stderr=subprocess.DEVNULL, timeout=10,
+                input=b'', stderr=subprocess.DEVNULL, timeout=10,
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         patch = git("diff", "HEAD", "--", ".")
         extra = git("ls-files", "--others", "--exclude-standard", "--",

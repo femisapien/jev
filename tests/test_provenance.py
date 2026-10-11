@@ -19,6 +19,18 @@ def test_native_checkouts_use_native_git():
         assert _git_command(root, windows=windows) == ['git', '-C', root]
 
 
+def test_git_receives_closed_pipe_instead_of_inheriting_detached_console_stdin(monkeypatch,tmp_path):
+    from jev.learn import provenance
+    calls=[]
+    def check(command,**kwargs):
+        calls.append(kwargs)
+        return b'abc\n' if command[-2:]==['rev-parse','HEAD'] else b''
+    monkeypatch.setattr(provenance.subprocess,'check_output',check)
+    code.cache_clear()
+    assert code(tmp_path)['commit']=='abc'
+    assert all(call['input']==b'' for call in calls)
+
+
 def test_identity_detects_tracked_and_untracked_source_changes(tmp_path):
     def git(*args):
         return subprocess.check_output(['git', '-C', str(tmp_path), *args])

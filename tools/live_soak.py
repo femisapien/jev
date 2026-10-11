@@ -41,6 +41,17 @@ class Reader:
                 yield row
 
 
+def verify_environment(manifest, commit):
+    """The controller's revision alone does not prove which code the client loaded."""
+    environment = manifest.get('environment') or {}
+    identity = environment.get('code') or {}
+    if identity.get('commit') != commit or identity.get('dirty') is not False:
+        return 'client did not record the clean expected candidate revision'
+    if (environment.get('settings') or {}).get('trip_mode') != 'shadow':
+        return 'client did not record shadow trip mode'
+    return None
+
+
 class Monitor:
     def __init__(self, now, expected_key=None):
         self.started = self.last_tick = self.last_progress = now
@@ -184,7 +195,7 @@ def main(argv=None):
             session+=1
             known=set((ROOT/'runs').glob('*')) if (ROOT/'runs').exists() else set()
             log=ROOT/'captures'/f'live-soak-{int(began)}-{session}.log'
-            readers=[];run=None;session_started=time.time()
+            readers=[];run=None;session_started=time.time();environment_checked=False
             with log.open('w') as output:
                 child=subprocess.Popen([args.windows_python,'-u','tools/start_teaching.py','--run',
                        '--dispatch','hybrid','--session-seconds',str(args.session_seconds)],
@@ -196,11 +207,16 @@ def main(argv=None):
                         if new:
                             run=max(new,key=lambda x:x.stat().st_mtime)
                             readers=[Reader(run/'ticks.jsonl'),Reader(run/'executions.jsonl')]
+                    environment_error=None
+                    if run is not None and not environment_checked and (run/'ticks.jsonl').exists():
+                        environment_error=verify_environment(
+                            json.loads((run/'manifest.json').read_text()),identity['commit'])
+                        environment_checked=environment_error is None
                     drain(readers)
                     reason=('operator stop' if stop.exists() or control_stop.exists() else
                             'hard test deadline reached' if now>=deadline else
                             'session exceeded its supervision deadline' if now-session_started>args.session_seconds+180
-                            else monitor.stop_reason(now))
+                            else environment_error or monitor.stop_reason(now))
                     state='playing' if monitor.last_tick>session_started else 'starting'
                     publish(state if reason is None else 'stopping',run=str(run) if run else None,reason=reason)
                     if reason:

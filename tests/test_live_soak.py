@@ -52,3 +52,16 @@ def test_progress_resets_failure_budget_without_erasing_operation_totals():
     m.event({'phase':'end','operation':'provisions','step_id':'buy','code':'no_supplier'})
     assert m.stop_reason(2) is None
     assert m.operations[('provisions','no_supplier')]==20
+
+
+def test_client_must_independently_record_the_clean_candidate_and_shadow_mode():
+    manifest={'environment':{'code':{'commit':'abc','dirty':False},
+                             'settings':{'trip_mode':'shadow'}}}
+    assert soak.verify_environment(manifest,'abc') is None
+    assert 'revision' in soak.verify_environment(manifest,'def')
+    manifest['environment']['code']['dirty']=True
+    assert 'revision' in soak.verify_environment(manifest,'abc')
+    assert 'revision' in soak.verify_environment({},'abc')
+    manifest['environment']['code']['dirty']=False
+    manifest['environment']['settings']['trip_mode']='active'
+    assert 'shadow' in soak.verify_environment(manifest,'abc')
