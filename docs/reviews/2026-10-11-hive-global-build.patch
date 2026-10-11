@@ -1,25 +1,3 @@
-From e37baf2754039eacf8d48ec48dcd5a94c8d778e5 Mon Sep 17 00:00:00 2001
-From: Ash <ashleyrowe1998@gmail.com>
-Date: Sun, 11 Oct 2026 13:42:46 +0100
-Subject: [PATCH] Isolate experiment arms, freeze comparison contracts, and
- fail inconclusive release gates
-
----
- hive/canary.py             | 145 ++++++++++++--
- hive/farm.py               |  22 +-
- hive/guard.py              |  19 +-
- hive/reward.py             |   6 +-
- hive/run.py                |  52 ++++-
- hive/trials.py             | 401 +++++++++++++++++++++++++++++++++++++
- ops/tick.sh                |  24 ++-
- tests/test_canary.py       |  24 +--
- tests/test_danger_count.py |  13 +-
- tests/test_guard.py        |  14 +-
- tests/test_trials.py       | 146 ++++++++++++++
- 11 files changed, 801 insertions(+), 65 deletions(-)
- create mode 100644 hive/trials.py
- create mode 100644 tests/test_trials.py
-
 diff --git a/hive/canary.py b/hive/canary.py
 index 4dabd32..12d43f9 100644
 --- a/hive/canary.py
@@ -339,6 +317,117 @@ index 4dabd32..12d43f9 100644
          print(json.dumps(doc))
          return 0
      if args.command == "status":
+diff --git a/hive/coach_report.py b/hive/coach_report.py
+new file mode 100644
+index 0000000..6f81a02
+--- /dev/null
++++ b/hive/coach_report.py
+@@ -0,0 +1,105 @@
++"""Publish coach output without hiding provider failures or inventing a diagnosis."""
++from __future__ import annotations
++
++import argparse
++from collections import Counter
++import json
++from pathlib import Path
++import subprocess
++import time
++
++
++def read_json(path):
++    try:
++        return json.loads(path.read_text())
++    except (OSError, ValueError):
++        return {}
++
++
++def fallback(var, reason):
++    counts = Counter()
++    for path in var.glob('farm-?.json'):
++        if time.time() - path.stat().st_mtime < 300:
++            counts.update(bot.get('state', 'unknown')
++                          for bot in read_json(path).get('bots', {}).values())
++    experiments = read_json(var / 'experiments.json')
++    lines = ['# Hive coach: evidence-only fallback', '',
++             f'The model diagnosis is unavailable: {reason.strip()[:400]}.',
++             'This report contains recorded measurements, not a source-code diagnosis or a proposed fix.', '',
++             f'Fresh farm status: {dict(counts)}.',
++             f'Experiment report written at Unix time {experiments.get("written", "unknown")}.']
++    for experiment in experiments.get('experiments', []):
++        lines.extend(['', f'## Recorded {experiment["experiment"]} arms'])
++        for name, arm in experiment.get('arms', {}).items():
++            lines.append(f'- {name}: {arm.get("characters")} characters, '
++                         f'{arm.get("hours")} played hours, '
++                         f'{arm.get("deaths_h")} deaths/hour, index {arm.get("index")}.')
++        lines.append('These aggregates do not establish improvement from the newest candidate.')
++    lines.extend(['', 'The full collected evidence is in var/coach-evidence.md. '
++                  'Automated code fixes must wait for a successful model diagnosis.'])
++    return '\n'.join(lines) + '\n'
++
++
++def publish(var, out, stamp, command, *, timeout=1800):
++    var, out = Path(var), Path(out)
++    logs = var / 'logs'
++    logs.mkdir(parents=True, exist_ok=True)
++    out.mkdir(parents=True, exist_ok=True)
++    status_path = var / 'coach-status.json'
++    previous = read_json(status_path)
++    now = time.time()
++    reason = previous.get('reason', '')
++    retry_at = previous.get('retry_at', 0)
++    success = False
++    if now >= retry_at:
++        stdout = logs / f'coach-{stamp}.stdout'
++        stderr = logs / f'coach-{stamp}.stderr'
++        with stdout.open('w') as output, stderr.open('w') as errors:
++            try:
++                result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=output,
++                                        stderr=errors, timeout=timeout, check=False)
++                code = result.returncode
++            except subprocess.TimeoutExpired:
++                code = 124
++            except OSError as exc:
++                errors.write(str(exc))
++                code = 127
++        text = stdout.read_text().strip()
++        success = code == 0 and bool(text)
++        if success:
++            report = text + '\n'
++            reason, retry_at = '', 0
++        else:
++            reason = (text or stderr.read_text().strip() or f'provider exited {code}')[:1000]
++            retry_at = now + (6 * 3600 if 'limit' in reason.lower() else 1800)
++    if not success:
++        report = fallback(var, reason)
++    path = out / f'{stamp}.md'
++    path.write_text(report)
++    # Keep the last model diagnosis separate; a fallback must never become fixer input.
++    (out / 'latest.md').write_text(report)
++    if success:
++        (out / 'latest-diagnosis.md').write_text(report)
++    status = {'at': time.time(), 'state': 'ready' if success else 'degraded',
++              'reason': reason, 'retry_at': retry_at, 'report': str(path),
++              'model_diagnosis': success}
++    status_path.write_text(json.dumps(status, indent=2) + '\n')
++    print(f'coach: {status["state"]}; report {path}')
++    return status
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--var', type=Path, required=True)
++    parser.add_argument('--out', type=Path, required=True)
++    parser.add_argument('--stamp', required=True)
++    parser.add_argument('command', nargs=argparse.REMAINDER)
++    args = parser.parse_args()
++    command = args.command[1:] if args.command[:1] == ['--'] else args.command
++    if not command:
++        parser.error('provider command required')
++    publish(args.var, args.out, args.stamp, command)
++
++
++if __name__ == '__main__':
++    main()
 diff --git a/hive/farm.py b/hive/farm.py
 index 9ee150f..84fef2f 100644
 --- a/hive/farm.py
@@ -632,10 +721,10 @@ index 4adcd9b..11e9bc2 100644
              # with no table only the ribs are grinds.
 diff --git a/hive/trials.py b/hive/trials.py
 new file mode 100644
-index 0000000..da6d46c
+index 0000000..dd0140e
 --- /dev/null
 +++ b/hive/trials.py
-@@ -0,0 +1,401 @@
+@@ -0,0 +1,402 @@
 +"""Versioned, isolated comparisons. Historical canary records remain protocol 1.
 +
 +Protocol 2 pins inputs before play, isolates learned files by arm, uses one observation
@@ -959,7 +1048,8 @@ index 0000000..da6d46c
 +        def git(*args):
 +            return subprocess.check_output(["git", "-C", str(root), *args],
 +                                           stderr=subprocess.DEVNULL, timeout=5)
-+        patch=git("diff", "HEAD", "--", ".")
++        # Generated coach reports change during a trial; they are not runtime inputs.
++        patch=git("diff", "HEAD", "--", ".", ":(exclude)docs/**", ":(exclude)**/*.md")
 +        extra=git("ls-files", "--others", "--exclude-standard", "--", "hive/*.py", "jev/*.py")
 +        return {"commit":git("rev-parse", "HEAD").decode().strip(),
 +                "dirty":bool(patch or extra), "patch_sha256":hashlib.sha256(patch).hexdigest(),
@@ -1037,6 +1127,46 @@ index 0000000..da6d46c
 +    parser.add_argument("--shard", required=True)
 +    args = parser.parse_args()
 +    print(token(tuple(int(x) for x in args.shard.split("/"))))
+diff --git a/ops/autofix.sh b/ops/autofix.sh
+index a4fca31..f339344 100755
+--- a/ops/autofix.sh
++++ b/ops/autofix.sh
+@@ -119,6 +119,13 @@ done
+ # One candidate at a time: none while one is on the canary.
+ [ -e "$VAR/canary.json" ] && exit 0
+ diagnosis="$HERE/docs/coach/latest.md"
++if [ -e "$VAR/coach-status.json" ]; then
++  if ! "$PY" -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("model_diagnosis") is True else 1)' "$VAR/coach-status.json"; then
++    say "no attempt: coach is providing measurements only; its model diagnosis is unavailable"
++    exit 0
++  fi
++  diagnosis="$HERE/docs/coach/latest-diagnosis.md"
++fi
+ [ -s "$diagnosis" ] || exit 0
+ # A diagnosis newer than the last attempt: each diagnosis gets one.
+ [ -e "$VAR/autofix.last" ] && [ ! "$diagnosis" -nt "$VAR/autofix.last" ] && exit 0
+diff --git a/ops/coach.sh b/ops/coach.sh
+index 3263e59..e0c2fa7 100755
+--- a/ops/coach.sh
++++ b/ops/coach.sh
+@@ -100,13 +100,7 @@ repeat a problem the last diagnosis named unless it is still costing time, and t
+ problem the evidence's \"Fixes tried and their results\" shows tried and not kept may be named
+ again only with what the tried fix missed.
+ Markdown, under 900 words."
+-if ! (cd "$HERE" && timeout 1800 "$CLAUDE" -p "$prompt" --allowedTools "Read" "Grep" "Glob" \
+-    --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" \
+-    --add-dir /home/ash/ForeverV2-dev > "$OUT/$stamp.md.part" 2> "$VAR/logs/coach.err" 9>&-); then
+-  echo "$(date '+%d %b %H:%M') the coach's diagnosis failed: see var/logs/coach.err" >> "$VAR/logs/keep.log"
+-  rm -f "$OUT/$stamp.md.part"
+-  exit 1
+-fi
+-mv "$OUT/$stamp.md.part" "$OUT/$stamp.md"
+-cp "$OUT/$stamp.md" "$OUT/latest.md"
+-echo "$(date '+%d %b %H:%M') the coach wrote docs/coach/$stamp.md" >> "$VAR/logs/keep.log"
++(cd "$HERE" && "$PY" -m hive.coach_report --var "$VAR" --out "$OUT" --stamp "$stamp" -- \
++  "$CLAUDE" -p "$prompt" --allowedTools "Read" "Grep" "Glob" \
++  --disallowedTools "Edit" "Write" "Bash" "NotebookEdit" \
++  --add-dir /home/ash/ForeverV2-dev 9>&-) >> "$VAR/logs/keep.log" 2>&1
 diff --git a/ops/tick.sh b/ops/tick.sh
 index 3df9633..802b053 100755
 --- a/ops/tick.sh
@@ -1176,6 +1306,39 @@ index 39cb765..49c3179 100644
      assert doc["measure"] and doc["commit"] == doc["fix"] == OLD and doc["base"] == "b" * 40
      assert doc["heads"] == [["b" * 40, 50.0]] and doc["stop_deaths"] == 2.0
      assert "stop_deaths_h" not in doc and len(doc["procs"]) == 3
+diff --git a/tests/test_coach_report.py b/tests/test_coach_report.py
+new file mode 100644
+index 0000000..a0098c7
+--- /dev/null
++++ b/tests/test_coach_report.py
+@@ -0,0 +1,27 @@
++import json
++import sys
++
++from hive.coach_report import publish
++
++
++def test_provider_failure_is_preserved_and_never_published_as_a_diagnosis(tmp_path):
++    var, out = tmp_path / 'var', tmp_path / 'out'
++    status = publish(var, out, 'one', [sys.executable, '-c',
++                     'print("weekly limit reached"); raise SystemExit(1)'])
++    assert status['state'] == 'degraded' and not status['model_diagnosis']
++    assert 'weekly limit reached' in (var / 'logs/coach-one.stdout').read_text()
++    assert 'evidence-only fallback' in (out / 'latest.md').read_text()
++    assert not (out / 'latest-diagnosis.md').exists()
++    # Cooldown uses the evidence fallback without invoking an unavailable provider again.
++    publish(var, out, 'two', ['/no/provider/here'])
++    assert not (var / 'logs/coach-two.stderr').exists()
++
++
++def test_successful_provider_keeps_real_diagnosis_separate(tmp_path):
++    var, out = tmp_path / 'var', tmp_path / 'out'
++    status = publish(var, out, 'one', [sys.executable, '-c', 'print("verified report")'])
++    assert status['model_diagnosis']
++    assert (out / 'latest-diagnosis.md').read_text() == 'verified report\n'
++    publish(var, out, 'two', [sys.executable, '-c', 'raise SystemExit(1)'])
++    assert (out / 'latest-diagnosis.md').read_text() == 'verified report\n'
++    assert not json.loads((var / 'coach-status.json').read_text())['model_diagnosis']
 diff --git a/tests/test_danger_count.py b/tests/test_danger_count.py
 index 5f1b044..97c48b3 100644
 --- a/tests/test_danger_count.py
@@ -1264,16 +1427,35 @@ index 3ae2541..f708cbc 100644
  
 diff --git a/tests/test_trials.py b/tests/test_trials.py
 new file mode 100644
-index 0000000..cb000e6
+index 0000000..64cab69
 --- /dev/null
 +++ b/tests/test_trials.py
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,165 @@
 +import json
 +import sqlite3
++import subprocess
 +
 +import pytest
 +
 +from hive import canary, config, reward, trials
++
++
++def test_coach_report_updates_do_not_invalidate_runtime_identity(tmp_path):
++    def git(*args):
++        return subprocess.run(['git', '-C', str(tmp_path), *args], check=True,
++                              capture_output=True)
++    git('init', '-q')
++    (tmp_path / 'docs').mkdir()
++    (tmp_path / 'hive').mkdir()
++    (tmp_path / 'docs/latest.md').write_text('old diagnosis')
++    (tmp_path / 'hive/main.py').write_text('code')
++    git('add', 'docs/latest.md', 'hive/main.py')
++    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
++    identity = trials.code_identity(tmp_path)
++    (tmp_path / 'docs/latest.md').write_text('updated measurements')
++    assert trials.code_identity(tmp_path) == identity
++    (tmp_path / 'hive/main.py').write_text('changed runtime')
++    assert trials.code_identity(tmp_path) != identity
 +
 +
 +def prepared(tmp_path, monkeypatch):
@@ -1414,6 +1596,3 @@ index 0000000..cb000e6
 +    assert not a['censored'] and a['played_s']==60
 +    assert b['censored'] and b['played_s']==70
 +    assert c['censored'] and c['played_s'] is None
--- 
-2.43.0
-

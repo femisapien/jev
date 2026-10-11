@@ -12,6 +12,8 @@ from collections import Counter, deque
 import fcntl
 import json
 import os
+import signal
+import socket
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +24,21 @@ sys.path.insert(0, str(ROOT))
 from jev.learn.provenance import artifact, code
 from jev.persist import atomic_json
 from tools.start_teaching import load_config, option
+
+
+def notify_service(message):
+    """Heartbeats go to the independent service manager, not the agent session."""
+    address = os.environ.get('NOTIFY_SOCKET')
+    if not address:
+        return
+    if address.startswith('@'):
+        address = '\0' + address[1:]
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+        sock.sendto(message.encode(), address)
+
+
+def interrupted(signum, frame):
+    raise RuntimeError(f'supervisor received {signal.Signals(signum).name}')
 
 
 class Reader:
@@ -170,12 +187,14 @@ def main(argv=None):
     def publish(state, **extra):
         atomic_json(area/'status.json',{**status,'state':state,'at':time.time(),
                     'session':session,'metrics':monitor.report(),'finished':finished,**extra})
+        notify_service('READY=1\nWATCHDOG=1\nSTATUS=' + state)
     def drain(readers):
         if readers:
             now=time.time()
             for row in readers[0].rows():monitor.tick(row,now)
             for row in readers[1].rows():monitor.event(row)
     def stop_child():
+        notify_service('STOPPING=1')
         control_stop.parent.mkdir(parents=True,exist_ok=True)
         control_stop.touch()
         if child is not None and child.poll() is None:
@@ -184,6 +203,8 @@ def main(argv=None):
             except subprocess.TimeoutExpired:
                 child.terminate()
                 child.wait(timeout=60)
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
     try:
         while time.time()<deadline and not reason:
             code.cache_clear()
