@@ -14,6 +14,7 @@ import json
 import os
 import signal
 import socket
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -56,6 +57,109 @@ class Reader:
                 row = json.loads(line)
                 self.offset = stream.tell()
                 yield row
+
+
+def windows_environment(python, *, sockets=Path('/run/WSL'), check=None):
+    """Probe harmless native Python before input ownership; stale init interop is common.
+
+    No gameplay process is retried. A timed-out probe only prints a marker and exits.
+    """
+    candidates=[]
+    inherited=os.environ.get('WSL_INTEROP')
+    if inherited and Path(inherited).exists():
+        candidates.append(inherited)
+    candidates.extend(str(p) for p in sorted(sockets.glob('*_interop'),
+                                             key=lambda p:p.stat().st_mtime, reverse=True)
+                      if stat.S_ISSOCK(p.stat().st_mode))
+    candidates.append(None)
+    seen=set()
+    for path in candidates:
+        key=str(Path(path).resolve()) if path else None
+        if key in seen: continue
+        if len(seen)>=5: break
+        seen.add(key)
+        environment=dict(os.environ)
+        environment.pop('WSL_INTEROP',None)
+        if path: environment['WSL_INTEROP']=path
+        entry={'interop':path}
+        try:
+            result=subprocess.run([python,'-c','print("JEV_WINDOWS_READY")'],env=environment,
+                                  capture_output=True,text=True,timeout=8,check=False)
+            entry.update(exit=result.returncode,ok=result.returncode==0 and
+                         'JEV_WINDOWS_READY' in result.stdout.splitlines())
+            if not entry['ok']:
+                entry['error']=(result.stderr or result.stdout)[-600:]
+        except (OSError,subprocess.TimeoutExpired) as exc:
+            entry.update(ok=False,error=f'{type(exc).__name__}: native launch probe failed')
+        if check: check(entry)
+        if entry['ok']: return environment
+    raise RuntimeError('no working Windows launch bridge; see startup_checks')
+
+
+class NativeSessions:
+    """Follow recordings across clean sessions inside one native Windows process."""
+    def __init__(self, root, journal, monitor, commit, log):
+        self.root,self.journal,self.monitor,self.commit,self.log=root,Reader(journal),monitor,commit,log
+        self.known=set(root.iterdir()) if root.exists() else set()
+        self.records={}
+        self.active=None
+        self.error=None
+
+    def attach(self, record, run):
+        if any(other is not record and other.get('run')==run for other in self.records.values()):
+            raise ValueError('recording belongs to another native session')
+        if record.get('run') is not None and record['run']!=run:
+            raise ValueError('native session changed its recording')
+        if record.get('run') is None:
+            record.update(run=run,readers=[Reader(run/'ticks.jsonl'),Reader(run/'executions.jsonl')],
+                          verified=False,observed=False)
+        self.known.add(run)
+
+    def poll(self, now):
+        for event in self.journal.rows():
+            n=event['session']
+            if event['event']=='started':
+                if n!=len(self.records)+1 or (self.active and 'exit' not in self.active):
+                    raise ValueError('native session lifecycle is out of order')
+                self.active={'session':n,'started':event['at'],'pid':event['pid'],'run':None}
+                self.records[n]=self.active
+            elif event['event']=='finished':
+                record=self.records[n]
+                if 'exit' in record: raise ValueError('native session finished twice')
+                names=event['runs']
+                if len(names)==1 and Path(names[0]).name==names[0]:
+                    self.attach(record,self.root/names[0])
+                elif names:
+                    raise ValueError('native session produced ambiguous recordings')
+                record.update(exit=event['exit'],seconds=event['seconds'])
+                if event['exit']!=0:
+                    self.error=f'native session {n} failed with code {event["exit"]}'
+        if self.active and 'exit' not in self.active and self.active['run'] is None:
+            new=[p for p in self.root.iterdir() if p.is_dir() and p not in self.known] \
+                if self.root.exists() else []
+            if len(new)>1: raise ValueError('multiple unclaimed native recordings')
+            if new: self.attach(self.active,new[0])
+        for record in self.records.values():
+            run=record.get('run')
+            if run is not None:
+                if not record['verified'] and (run/'ticks.jsonl').exists():
+                    error=verify_environment(json.loads((run/'manifest.json').read_text()),self.commit)
+                    if error: self.error=error; continue
+                    record['verified']=True
+                if record['verified']:
+                    for row in record['readers'][0].rows():
+                        self.monitor.tick(row,now)
+                        if (row.get('state',{}).get('sense') or {}).get('addon_ok'):
+                            record['observed']=True
+                    for row in record['readers'][1].rows(): self.monitor.event(row)
+            if 'exit' in record and record['exit']==0 and not record.get('observed'):
+                self.error='session ended without a verified gameplay observation'
+        return self.error
+
+    def finished(self):
+        return [{'session':r['session'],'run':str(r['run']) if r['run'] else None,
+                 'exit':r['exit'],'seconds':r['seconds'],'log':str(self.log),'native_pid':r['pid']}
+                for r in self.records.values() if 'exit' in r]
 
 
 def verify_environment(manifest, commit):
@@ -188,11 +292,6 @@ def main(argv=None):
         atomic_json(area/'status.json',{**status,'state':state,'at':time.time(),
                     'session':session,'metrics':monitor.report(),'finished':finished,**extra})
         notify_service('READY=1\nWATCHDOG=1\nSTATUS=' + state)
-    def drain(readers):
-        if readers:
-            now=time.time()
-            for row in readers[0].rows():monitor.tick(row,now)
-            for row in readers[1].rows():monitor.event(row)
     def stop_child():
         notify_service('STOPPING=1')
         control_stop.parent.mkdir(parents=True,exist_ok=True)
@@ -206,54 +305,61 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     try:
-        while time.time()<deadline and not reason:
-            code.cache_clear()
-            if code()!=identity:
-                reason='candidate code changed during the soak';break
-            if artifact(config_path)!=config_identity:
-                reason='launch configuration changed during the soak';break
-            if stop.exists():reason='operator stop';break
-            session+=1
-            known=set((ROOT/'runs').glob('*')) if (ROOT/'runs').exists() else set()
-            log=ROOT/'captures'/f'live-soak-{int(began)}-{session}.log'
-            readers=[];run=None;session_started=time.time();environment_checked=False
-            with log.open('w') as output:
-                child=subprocess.Popen([args.windows_python,'-u','tools/start_teaching.py','--run',
-                       '--dispatch','hybrid','--session-seconds',str(args.session_seconds)],
-                       cwd=ROOT,stdin=subprocess.DEVNULL,stdout=output,stderr=subprocess.STDOUT)
-                while child.poll() is None:
-                    now=time.time()
-                    if run is None and (ROOT/'runs').exists():
-                        new=[x for x in (ROOT/'runs').iterdir() if x not in known and x.is_dir()]
-                        if new:
-                            run=max(new,key=lambda x:x.stat().st_mtime)
-                            readers=[Reader(run/'ticks.jsonl'),Reader(run/'executions.jsonl')]
-                    environment_error=None
-                    if run is not None and not environment_checked and (run/'ticks.jsonl').exists():
-                        environment_error=verify_environment(
-                            json.loads((run/'manifest.json').read_text()),identity['commit'])
-                        environment_checked=environment_error is None
-                    drain(readers)
-                    reason=('operator stop' if stop.exists() or control_stop.exists() else
-                            'hard test deadline reached' if now>=deadline else
-                            'session exceeded its supervision deadline' if now-session_started>args.session_seconds+180
-                            else environment_error or monitor.stop_reason(now))
-                    state='playing' if monitor.last_tick>session_started else 'starting'
-                    publish(state if reason is None else 'stopping',run=str(run) if run else None,reason=reason)
-                    if reason:
-                        stop_child()
-                        break
-                    time.sleep(10)
-                rc=child.wait(timeout=60)
-                drain(readers)
-                finished.append({'session':session,'run':str(run) if run else None,'exit':rc,
-                                 'seconds':time.time()-session_started,'log':str(log)})
-                if rc and reason is None:reason=f'supervisor exited with code {rc}'
-                if reason is None and monitor.last_tick<=session_started:
-                    reason='session ended without a verified gameplay observation'
-            publish('between sessions',reason=reason)
+        status['startup_checks']=[]
+        def checked(entry):
+            status['startup_checks'].append(entry)
+            publish('checking Windows bridge')
+        publish('checking Windows bridge')
+        environment=windows_environment(args.windows_python,check=checked)
+        code.cache_clear()
+        if code()!=identity or artifact(config_path)!=config_identity:
+            raise RuntimeError('code or launch configuration changed during startup checks')
+        status.update(interop=environment.get('WSL_INTEROP'),native_continuous=True)
+        log=ROOT/'captures'/f'live-soak-{int(began)}-native.log'
+        journal=area/f'native-sessions-{int(began)}.jsonl'
+        status.update(log=str(log),session_journal=str(journal))
+        following=NativeSessions(ROOT/'runs',journal,monitor,identity['commit'],log)
+        with log.open('w') as output:
+            # Clean sessions rotate inside Windows. Crossing WSL for each session failed
+            # at 22:07 on 11 October despite two healthy native runs beforehand.
+            child=subprocess.Popen([args.windows_python,'-u','tools/start_teaching.py','--run',
+                   '--dispatch','hybrid','--sessions','0','--session-seconds',str(args.session_seconds),
+                   '--session-events',str(journal.relative_to(ROOT))],
+                   cwd=ROOT,env=environment,stdin=subprocess.DEVNULL,stdout=output,stderr=subprocess.STDOUT)
+            while True:
+                now=time.time()
+                environment_error=following.poll(now)
+                finished=following.finished()
+                active=following.active
+                session=active['session'] if active else 0
+                started=active['started'] if active else began
+                run=active.get('run') if active else None
+                code.cache_clear()
+                reason=('operator stop' if stop.exists() or control_stop.exists() else
+                        'hard test deadline reached' if now>=deadline else
+                        'candidate code changed during the soak' if code()!=identity else
+                        'launch configuration changed during the soak' if artifact(config_path)!=config_identity else
+                        'session exceeded its supervision deadline' if now-started>args.session_seconds+180 else
+                        environment_error or monitor.stop_reason(now))
+                rc=child.poll()
+                if rc is not None:
+                    if reason is None and rc:
+                        reason=f'native launcher exited with code {rc}; see {log.name}'
+                    if reason is None and (not finished or (active and 'exit' not in active)):
+                        reason='native launcher ended without complete session evidence'
+                    if reason is None: reason='native session collection completed'
+                    break
+                state='playing' if active and active.get('observed') else 'starting'
+                publish(state if reason is None else 'stopping',run=str(run) if run else None,reason=reason)
+                if reason:
+                    stop_child()
+                    following.poll(time.time())
+                    finished=following.finished()
+                    break
+                time.sleep(10)
         publish('stopped',reason=reason or 'test duration completed')
-        return 0 if reason in (None,'hard test deadline reached','operator stop') else 1
+        return 0 if reason in (None,'hard test deadline reached','operator stop',
+                              'native session collection completed') else 1
     except Exception as exc:
         reason=f'monitor failed: {type(exc).__name__}: {exc}'
         publish('stopping',reason=reason)

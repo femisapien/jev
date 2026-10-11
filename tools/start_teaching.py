@@ -12,6 +12,7 @@ import json
 import math
 import os
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,14 +74,13 @@ def route_done(args) -> bool:
     return not required or required <= set(memory.completed)
 
 
-def run_sessions(args, *, sessions: int = 1, run=None, is_done=route_done) -> int:
+def run_sessions(args, *, sessions: int = 1, run=None, is_done=route_done, events=None) -> int:
     if type(sessions) is not int or sessions < 0:
         raise ValueError("sessions must be nonnegative; zero means continuous")
     if run is None:
         from jev.run.cli import main
 
         run = main
-        import time
         print(f"startup: imported at {time.strftime('%H:%M:%S')}", flush=True)
     completed = 0
     while sessions == 0 or completed < sessions:
@@ -90,7 +90,21 @@ def run_sessions(args, *, sessions: int = 1, run=None, is_done=route_done) -> in
         if is_done(args):
             print("supported quest route is complete; collection finished")
             return 0
-        code = run(list(args))
+        runs = Path(option(args, "--runs-dir", "runs"))
+        known = set(runs.iterdir()) if events and runs.exists() else set()
+        began = time.time()
+        if events:
+            events({"event": "started", "session": completed + 1, "at": began,
+                    "pid": os.getpid()})
+        code = None
+        try:
+            code = run(list(args))
+        finally:
+            if events:
+                created = sorted(p.name for p in runs.iterdir() if p.is_dir() and p not in known) \
+                    if runs.exists() else []
+                events({"event": "finished", "session": completed + 1, "at": time.time(),
+                        "exit": code, "seconds": time.time() - began, "runs": created})
         completed += 1
         if code != 0:
             return code
@@ -111,6 +125,8 @@ def main(argv=None):
                         help="who takes an objective first: hybrid, the only one")
     parser.add_argument("--sessions", type=int, default=1, help="clean collection sessions; 0 repeats until stop/failure/route end")
     parser.add_argument("--session-seconds", type=float)
+    parser.add_argument("--session-events", type=Path,
+                        help="append native session lifecycle evidence for the outer supervisor")
     args = parser.parse_args(argv)
     if args.sessions < 0 or (args.session_seconds is not None and (
             not math.isfinite(args.session_seconds) or args.session_seconds <= 0)):
@@ -131,7 +147,14 @@ def main(argv=None):
     previous = Path.cwd()
     try:
         os.chdir(directory)
-        return run_sessions(command, sessions=args.sessions)
+        def record_event(event):
+            args.session_events.parent.mkdir(parents=True, exist_ok=True)
+            with args.session_events.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(event) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+        return run_sessions(command, sessions=args.sessions,
+                            events=record_event if args.session_events else None)
     except KeyboardInterrupt:
         return 130
     finally:
