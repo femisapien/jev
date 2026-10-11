@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
+import shutil
 import subprocess
 import sys
 from functools import lru_cache
@@ -21,6 +23,39 @@ def _git_command(root: str | Path, *, windows: bool) -> list[str]:
         linux_path = '/' + '/'.join(path.parts[1:])
         return ['wsl.exe', '--distribution', share[3], '--exec', 'git', '-C', linux_path]
     return ['git', '-C', str(root)]
+
+
+def _windows_gitdir(root, gitfile):
+    """Translate a linked worktree's Linux gitdir into its owning UNC share."""
+    path = PureWindowsPath(root)
+    if not gitfile.startswith('gitdir: '):
+        raise ValueError('invalid worktree Git directory pointer')
+    target = gitfile[len('gitdir: '):].strip()
+    if target.startswith('/'):
+        return str(PureWindowsPath(path.anchor, *target.strip('/').split('/')))
+    return str(path / PureWindowsPath(target))
+
+
+def _native_wsl_git(root):
+    """Read WSL files with native Git when available, without another interop hop.
+
+    Windows cannot observe Unix executable bits through this share. Content and
+    untracked-source checks still run; the result explicitly reports that limitation.
+    """
+    share = PureWindowsPath(root).drive.split('\\')
+    if len(share) != 4 or share[2].lower() not in {'wsl$', 'wsl.localhost'}:
+        return None
+    executable = shutil.which('git')
+    if executable is None:
+        candidate = Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'Git/cmd/git.exe'
+        if candidate.is_file():
+            executable = str(candidate)
+    if executable is None:
+        return None
+    pointer = root / '.git'
+    gitdir = _windows_gitdir(root, pointer.read_text()) if pointer.is_file() else str(pointer)
+    return [executable, '-c', 'core.autocrlf=false', '-c', 'core.filemode=false',
+            '--git-dir', gitdir, '--work-tree', str(root)]
 
 
 def digest(value) -> str:
@@ -52,20 +87,24 @@ def code(root: str | Path = ROOT) -> dict:
     """Pin the checkout at process startup, including tracked local edits."""
     root = Path(root).resolve()
     try:
+        native = _native_wsl_git(root) if sys.platform == 'win32' else None
+        command = native or _git_command(root, windows=sys.platform == 'win32')
         def git(*args):
             return subprocess.check_output(
-                [*_git_command(root, windows=sys.platform == 'win32'), *args],
+                [*command, *args],
                 input=b'', stderr=subprocess.DEVNULL, timeout=10,
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        patch = git("diff", "HEAD", "--", ".")
+        patch = git("diff", "--no-ext-diff", "--no-textconv", "HEAD", "--", ".")
         extra = git("ls-files", "--others", "--exclude-standard", "--",
                     "jev/*.py", "hive/*.py", "tools/*.py", "addons/*.lua").decode().splitlines()
         untracked = {name: artifact(root / name).get("sha256") for name in extra}
         return {"root": str(root), "commit": git("rev-parse", "HEAD").decode().strip(),
                 "tracked_diff_sha256": hashlib.sha256(patch).hexdigest(),
-                "untracked_source_sha256": digest(untracked), "dirty": bool(patch or extra)}
-    except (OSError, subprocess.SubprocessError):
-        return {"root": str(root), "unavailable": True}
+                "untracked_source_sha256": digest(untracked), "dirty": bool(patch or extra),
+                "unix_modes_checked": native is None,
+                "git_backend": 'native-windows-wsl-share' if native else 'owning-filesystem'}
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return {"root": str(root), "unavailable": True, "error": type(exc).__name__}
 
 
 def manifest(*, tier: str, graph=None, artifacts=(), **settings) -> dict:

@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from jev.learn.provenance import _git_command, code
+from jev.learn.provenance import _git_command, _windows_gitdir, code
 
 
 @pytest.mark.parametrize('server', ['wsl.localhost', 'WSL$'])
@@ -17,6 +17,15 @@ def test_native_checkouts_use_native_git():
     for root, windows in [('/home/ash/repo', False), (r'C:\repo', True),
                           (r'\\fileserver\share\repo', True)]:
         assert _git_command(root, windows=windows) == ['git', '-C', root]
+
+
+def test_native_git_resolves_linux_worktree_pointer_inside_its_own_unc_share():
+    root = r'\\wsl.localhost\Ubuntu-24.04\home\ash\candidate'
+    assert _windows_gitdir(root, 'gitdir: /home/ash/main/.git/worktrees/candidate\n') == (
+        r'\\wsl.localhost\Ubuntu-24.04\home\ash\main\.git\worktrees\candidate')
+    assert _windows_gitdir(root, 'gitdir: .git-internal\n') == root + r'\.git-internal'
+    with pytest.raises(ValueError):
+        _windows_gitdir(root, 'not a worktree pointer')
 
 
 def test_git_receives_closed_pipe_instead_of_inheriting_detached_console_stdin(monkeypatch,tmp_path):

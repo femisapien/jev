@@ -97,8 +97,10 @@ not replace the release comparisons above or establish an improvement by itself.
 
 The initial native Windows test exposed a WSL data-symlink deployment gap and a Git
 identity issue with linked worktrees and detached stdin. The candidate now has readable
-local data, and revision capture uses the owning WSL distribution with an explicitly
-closed input pipe. The monitor also verifies the client's recorded revision. A live
+local data, and revision capture uses native Windows Git against the WSL share when
+available, with owning-distribution Git as a fallback and an explicitly closed input
+pipe. Native Git reports its inability to observe Unix mode bits; the Linux supervisor
+also verifies the clean checkout. The monitor verifies the client's recorded revision. A live
 review found that the teaching wrapper omitted the new trip callbacks; these now forward
 to its live body, covered by a painted-radio integration test. Early play repaired broken
 equipment, sold 27 stacks, and recorded a kill and XP gain. These observations confirm
