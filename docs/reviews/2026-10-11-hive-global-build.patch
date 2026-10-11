@@ -1,0 +1,1419 @@
+From e37baf2754039eacf8d48ec48dcd5a94c8d778e5 Mon Sep 17 00:00:00 2001
+From: Ash <ashleyrowe1998@gmail.com>
+Date: Sun, 11 Oct 2026 13:42:46 +0100
+Subject: [PATCH] Isolate experiment arms, freeze comparison contracts, and
+ fail inconclusive release gates
+
+---
+ hive/canary.py             | 145 ++++++++++++--
+ hive/farm.py               |  22 +-
+ hive/guard.py              |  19 +-
+ hive/reward.py             |   6 +-
+ hive/run.py                |  52 ++++-
+ hive/trials.py             | 401 +++++++++++++++++++++++++++++++++++++
+ ops/tick.sh                |  24 ++-
+ tests/test_canary.py       |  24 +--
+ tests/test_danger_count.py |  13 +-
+ tests/test_guard.py        |  14 +-
+ tests/test_trials.py       | 146 ++++++++++++++
+ 11 files changed, 801 insertions(+), 65 deletions(-)
+ create mode 100644 hive/trials.py
+ create mode 100644 tests/test_trials.py
+
+diff --git a/hive/canary.py b/hive/canary.py
+index 4dabd32..12d43f9 100644
+--- a/hive/canary.py
++++ b/hive/canary.py
+@@ -444,12 +444,13 @@ def candidate_size(n: int, taken: int = 0) -> int:
+ 
+ 
+ def pick_set(guids, n: int, size: int | None = None, *, exclude=(),
+-             prefer=()) -> tuple[list[int], list[int]]:
++             prefer=(), seed: int | None = None, strata=None) -> tuple[list[int], list[int]]:
+     """The `size` processes of `n` (`candidate_size`) whose characters (`config.shard_of_guid`)
+     are nearest `size / n` of them all, the lowest set on a tie, and each process's count.
+     None of `exclude` (the other slot's), and as few as can be of the rest not in `prefer`
+     (`_spoiled`: the other slot's control is what this one takes from)."""
+     from itertools import combinations
++    guids = list(guids)
+     exclude, prefer = frozenset(exclude), frozenset(prefer)
+     size = candidate_size(n, len(exclude)) if size is None else size
+     free = [k for k in range(n) if k not in exclude]
+@@ -460,6 +461,22 @@ def pick_set(guids, n: int, size: int | None = None, *, exclude=(),
+     for guid in guids:
+         counts[config.shard_of_guid(guid, n)] += 1
+     share = sum(counts) * size / n
++    if seed is not None:
++        import random
++        guids = list(guids)
++        groups = {}
++        for guid in guids:
++            label = (strata or {}).get(guid, "unknown")
++            groups.setdefault(label, [0] * n)[config.shard_of_guid(guid, n)] += 1
++        def imbalance(ks):
++            return sum(abs(sum(c[k] for k in ks) - sum(c[k] for k in free) * size / len(free))
++                       / max(1, sum(c)) for c in groups.values())
++        ranked = sorted(combinations(free, size), key=lambda ks: (
++            sum(k not in prefer for k in ks) if prefer else 0, imbalance(ks),
++            abs(sum(counts[k] for k in ks) - share)))
++        # Randomize among the most balanced quarter, retaining the recorded seed.
++        best = random.Random(seed).choice(ranked[:max(1, len(ranked) // 4)])
++        return list(best), counts
+     best = min(combinations(free, size),
+                key=lambda ks: (sum(1 for k in ks if k not in prefer) if prefer else 0,
+                                abs(sum(counts[k] for k in ks) - share), ks))
+@@ -527,7 +544,8 @@ def set_candidate(branch: str, commit: str, *, fix: str | None = None, base: str
+                   target: dict | None = None, guids=None, procs: int | None = None,
+                   now: float | None = None, min_s: float | None = None,
+                   max_s: float | None = None, slot: str = "a", measure: bool = False,
+-                  stops: dict | None = None, also: list[dict] | None = None) -> dict:
++                  stops: dict | None = None, also: list[dict] | None = None,
++                  protocol: int = 2, arm_settings: dict | None = None) -> dict:
+     """Name the candidate the canary plays next in `slot`; one at a time a slot. `commit` is
+     what the canary plays (hive-findings' head `base` with the fix merged in, `build`), `fix`
+     the fix branch's own head, what a kept candidate merges. `procs` is the farm's split (the
+@@ -540,9 +558,23 @@ def set_candidate(branch: str, commit: str, *, fix: str | None = None, base: str
+     if load(path) is not None:
+         raise RuntimeError(f"a candidate is on the {label(slot)} already: {load(path)['branch']}")
+     now = time.time() if now is None else now
++    cohort = list(living_guids() if guids is None else guids)
++    seed = int(now * 1000000)
++    if protocol == 2 and any(load(slot_path(s)) for s in SLOTS):
++        raise ValueError("protocol 2 requires an exclusive comparison with isolated control state")
+     exclude, prefer, n = _beside(slot, procs or farm_split(), now)
+-    ks, counts = pick_set(living_guids() if guids is None else guids, n, exclude=exclude,
+-                          prefer=prefer)
++    strata = {}
++    if protocol == 2:
++        from hive import lineage
++        if lineage.DB.exists():
++            con = sqlite_ro(lineage.DB)
++            try:
++                for row in con.execute("select guid, race, class, level from characters"):
++                    strata[row["guid"]] = (row["race"], row["class"], (row["level"] or 1) // 5)
++            finally:
++                con.close()
++    ks, counts = pick_set(cohort, n, exclude=exclude, prefer=prefer,
++                          seed=seed if protocol == 2 else None, strata=strata)
+     doc = {"branch": branch, "commit": commit, "fix": commit if measure else fix or commit,
+            "base": base or branch_head() or commit, "since": now, "procs": ks, "of": n,
+            "set": now, "started": False, "counts": counts, "rebuilds": 0, "target": target}
+@@ -562,6 +594,10 @@ def set_candidate(branch: str, commit: str, *, fix: str | None = None, base: str
+         doc["min_s"] = float(min_s)
+     if max_s is not None:
+         doc["max_s"] = float(max(max_s, min_s or 0.0))
++    if protocol == 2:
++        from hive import trials
++        doc.update(assignment_seed=seed, cohort=cohort, arm_settings=arm_settings or {})
++        doc.update(trials.prepare(doc))
+     save(doc, path)
+     what = (f"a measurement (played as it is, never merged, against {BRANCH} "
+             f"{doc['base'][:7]} and whatever the control plays after it)"
+@@ -686,6 +722,10 @@ def rebuild(now: float | None = None, *, log=say, suite_tree: Path | None = None
+         return None
+     doc.setdefault("fix", doc["commit"])
+     head = branch_head()
++    if doc.get("protocol") == 2 and head != doc.get("base"):
++        close(doc, "comparison invalidated", "control code changed; prepare a fresh assignment",
++              now=now, log=log)
++        return None
+     if is_measure(doc):
+         note_head(doc, head, now, log=log)
+     elif head is not None and (head != doc.get("base")
+@@ -710,6 +750,10 @@ def rebuild(now: float | None = None, *, log=say, suite_tree: Path | None = None
+             _record_arm(doc, now)
+         doc.update(commit=candidate, base=head, started=False, since=now, set=now,
+                    rebuilds=doc.get("rebuilds", 0) + 1)
++        if doc.get("protocol") == 2:
++            from hive import trials
++            # The previous contract stays on disk; this combined code gets a new one.
++            doc.update(trials.prepare(doc))
+         save(doc, path)
+     state = suite_state(doc["commit"])
+     if state == "failed":
+@@ -814,6 +858,13 @@ def _active(doc: dict | None, procs: list[dict], tree: Path, log) -> tuple[bool,
+         return False, "no candidate"
+     if STOP.exists():
+         return False, "CANARY_STOP"
++    if doc.get("protocol") == 2:
++        from hive import trials
++        try:
++            if not trials.read(doc)["normalization"]:
++                return False, "trial needs a frozen reference curve"
++        except (OSError, ValueError, KeyError) as exc:
++            return False, f"invalid trial: {exc}"
+     if not is_measure(doc):
+         head = branch_head()
+         if head is None or head != doc.get("base") or not contains_base(doc["commit"], head):
+@@ -832,6 +883,9 @@ def _repick(doc: dict, shards: int, log, *, exclude=(), prefer=()) -> dict | Non
+     """A candidate not yet played, named for another split than the farm's `shards` (or on a
+     process the other slot plays): its processes picked again of the farm's (`pick_set`), none
+     of `exclude`, so the farm keeps its count. `None` when the farm has no process to spare."""
++    if doc.get("protocol") == 2:
++        log("fixed trial assignment cannot be repicked; close it and prepare a new trial")
++        return None
+     try:
+         ks, counts = pick_set(living_guids(), shards, exclude=exclude, prefer=prefer)
+     except ValueError:
+@@ -889,6 +943,8 @@ def plan(procs: list[dict], shards: int, playing_tree: str, *, tree: Path | None
+         docs[s] = doc
+         taken[s] = candidate_procs(doc)[0]
+     owner = {k: s for s, ks in taken.items() for k in ks}
++    from hive import trials
++    trial_docs = [docs[s] for s in taken]
+     on_slot = {str(trees[s]): s for s in SLOTS}
+     # A process without a shard (started by hand) is not the tick's, as before.
+     live = [p for p in procs if not p["draining"] and p["spec"] is not None]
+@@ -900,7 +956,10 @@ def plan(procs: list[dict], shards: int, playing_tree: str, *, tree: Path | None
+         for p in live:
+             k = p["spec"][0]
+             on, want = on_slot.get(p["tree"]), owner.get(k)
+-            if want is not None and on != want:
++            expected = trials.token((k, n), trial_docs)
++            if p.get("trial", "-") != expected:
++                moves.append(("drain", p["pid"], "trial observation and learning contract changed"))
++            elif want is not None and on != want:
+                 moves.append(("drain", p["pid"], f"process {k}/{n} goes to the candidate "
+                                                  f"{docs[want]['commit'][:7]}"
+                                                  + ("" if want == "a" else f" of {label(want)}")))
+@@ -913,13 +972,23 @@ def plan(procs: list[dict], shards: int, playing_tree: str, *, tree: Path | None
+         if k in running:
+             continue
+         s = owner.get(k)
+-        moves.append(("start", k, n, str(trees[s]) if s else playing_tree))
+-        if s and not docs[s].get("started"):
++        move = ("start", k, n, str(trees[s]) if s else playing_tree)
++        if trials.active(trial_docs):
++            move += (trials.token((k, n), trial_docs),)
++        moves.append(move)
++        if s and not docs[s].get("started") and docs[s].get("protocol") != 2:
+             doc = docs[s]
+             doc.update(started=True, since=now)
+             save(doc, slot_path(s))
+             log(f"the {label(s)} plays {doc['branch']} ({doc['commit'][:7]}) on "
+                 f"{describe(taken[s], n)} from {trees[s]}: since {_stamp(now)}")
++    for s in taken:
++        doc = docs[s]
++        if (doc.get("protocol") == 2 and not doc.get("started") and len(running) == n
++                and not any(p["draining"] for p in procs)):
++            doc.update(started=True, since=now)
++            save(doc, slot_path(s))
++            log(f"{label(s)} begins its fixed window after every process adopted the trial contract")
+     return moves
+ 
+ 
+@@ -932,6 +1001,8 @@ def _read_procs(lines) -> list[dict]:
+         spec = shard_of(parts[1]) if "/" in parts[1] else None
+         procs.append({"pid": int(parts[0]), "spec": spec, "tree": parts[2],
+                       "draining": parts[3] == "1"})
++        if len(parts) > 4:
++            procs[-1]["trial"] = parts[4]
+     return procs
+ 
+ 
+@@ -1145,7 +1216,8 @@ def score(since: float, until: float, ks, n: int, *, budget_s: float = 300.0,
+ # -- the gate: the fix's own target, and guards against breakage ------------------------------
+ 
+ def score_gate(target: dict, since: float, until: float, ks, n: int, *,
+-               budget_s: float = 300.0, read_only: bool = False, log=say, others=()):
++               budget_s: float = 300.0, read_only: bool = False, log=say, others=(),
++               frozen_pace=None, cohort=None, actual_time=False):
+     """Both arms for the gate: each character's counts (`event_rows`, the target's among them)
+     and its speed index against its baseline (`pairs`), those left out, and how many runs are
+     not read yet (the judge waits for them: a window half read is no window). The control is
+@@ -1159,9 +1231,23 @@ def score_gate(target: dict, since: float, until: float, ks, n: int, *,
+     base = events.tally(runs, since - BASELINE_S, since, count)
+     table, deaths, con = _deaths_and_pace(since, read_only=read_only, budget_s=budget_s, log=log)
+     with closing(con):
+-        pace = reward.curve(con, table)
++        pace = (reward.curve(con, table) if frozen_pace is None else
++                {int(k): v for k, v in frozen_pace.items()})
+         speed_rows, speed_left = pairs(con, since, until, deaths, table, pace)
+     rows, left = event_rows(window, base, deaths, since, until)
++    for guid, row in speed_rows.items():
++        row["cluster"] = config.shard_of_guid(guid, n)
++        if actual_time:
++            row["utility_index"] = row["index"]
++            row["index"] *= (row["played_s"] + reward.DEATH_S * row["deaths"]) / row["played_s"]
++            row["base_index"] *= (row["base_played_s"] + reward.DEATH_S * row["base_deaths"]) / row["base_played_s"]
++            row["change"] = row["index"] - row["base_index"]
++    for guid, row in rows.items():
++        row["cluster"] = config.shard_of_guid(guid, n)
++    if cohort is not None:
++        members_kept = set(cohort)
++        speed_rows = {g:r for g,r in speed_rows.items() if g in members_kept}
++        rows = {g:r for g,r in rows.items() if g in members_kept}
+     arm_of = arm_function(ks, n, others)
+     members = target_members(target, since)
+     if members is not None:
+@@ -1730,6 +1816,15 @@ def judge(now: float | None = None, *, dry_run: bool = False, log=say,
+         if elapsed < min_s:
+             return None
+         until = now - reward.SETTLE_S
++        extra = {}
++        if doc.get("protocol") == 2:
++            from hive import trials
++            contract = trials.read(doc)
++            until = doc["since"] + contract["window_s"]
++            if now < until + reward.SETTLE_S:
++                return None
++            extra = {"frozen_pace": contract["normalization"],
++                     "cohort": contract["cohort"], "actual_time": True}
+         target = doc.get("target")
+         if not target:
+             close(doc, "no target", "the candidate names no event it reduces (target.json)",
+@@ -1737,12 +1832,25 @@ def judge(now: float | None = None, *, dry_run: bool = False, log=say,
+             return {"outcome": "no target"}
+         beside = others(slot, doc["since"], until)
+         events_by_arm, speed_by_arm, left_out, pending = scorer(target, doc["since"], until, ks,
+-                                                                n, log=log, others=beside)
++                                                                n, log=log, others=beside, **extra)
+         if pending and elapsed < max_s:
+             log(f"{tag}: {branch} ({commit[:7]}) waits: {pending} runs not read yet")
+             return {"outcome": "waiting", "why": f"{pending} runs not read yet"}
+-        result = gate(events_by_arm, speed_by_arm, elapsed, left_out=left_out, min_s=min_s,
+-                      max_s=max_s, decide=target.get("decide"))
++        if doc.get("protocol") == 2:
++            if pending:
++                result = {"protocol": 2, "outcome": "not enough evidence", "status": "inconclusive",
++                          "checks": {}, "why": "fixed window still has unread evidence"}
++            else:
++                result = trials.evaluate(events_by_arm, speed_by_arm,
++                                         decide=target.get("decide", "target"),
++                                         correctness=target.get("kind") == "correctness")
++            result["coverage"] = trials.coverage(doc, speed_by_arm)
++            result["milestones"] = trials.milestones(doc, until)
++            result["trial_manifest"] = doc["trial_manifest"]
++            result["trial_manifest_sha256"] = doc["trial_manifest_sha256"]
++        else:
++            result = gate(events_by_arm, speed_by_arm, elapsed, left_out=left_out, min_s=min_s,
++                          max_s=max_s, decide=target.get("decide"))
+         result["window"] = [doc["since"], until]
+         result["target"] = target
+         if beside:
+@@ -1785,6 +1893,9 @@ def judge(now: float | None = None, *, dry_run: bool = False, log=say,
+             "hours": result.get("hours"), "target_events": result.get("target_events"),
+             "left_out": result.get("left_out"), "window": result.get("window"),
+             "detail": detail, **({"slot": slot} if slot != "a" else {})})
++    if doc.get("protocol") == 2:
++        from hive import trials
++        trials.save_result(doc, result)
+     _decide(doc, result, now)
+     clear(path)
+     return result
+@@ -1910,6 +2021,10 @@ def _judge_measure(doc: dict, now: float, *, dry_run: bool, log, scorer, slot: s
+     (`python -m hive.canary stop`), it is stopped now by hand, `stop` why, with the numbers it
+     has. The doc's "also" targets (one naming classes: those characters alone) are read beside
+     its own, reported and never decided on (`also_read`)."""
++    if doc.get("protocol") == 2:
++        from hive import trials
++        return trials.measure(doc, now, dry_run=dry_run, log=log, scorer=scorer,
++                              slot=slot, target=target, stop=stop)
+     from hive import reward
+     path = slot_path(slot)
+     tag = "judge" if slot == "a" else f"judge ({label(slot)})"
+@@ -2405,7 +2520,7 @@ def next_bets(queue: Path | None = None) -> int:
+                                     min_s=float(bet.get("min_h", 3)) * 3600,
+                                     max_s=float(bet.get("max_h", 5)) * 3600, slot=slot,
+                                     measure=measure, stops=bet if measure else None,
+-                                    also=also or None)
++                                    also=also or None, arm_settings=bet.get("arm_settings"))
+             except ValueError as exc:            # no process to spare beside the other slot
+                 say(f"queue: {bet.get('branch')} waits: the {label(slot)} cannot be filled: {exc}")
+                 break
+@@ -2455,6 +2570,7 @@ def main(argv: list[str]) -> int:
+                         help="power --gate: where run counts are kept (none: kept nowhere)")
+     parser.add_argument("--slot", choices=SLOTS, default="a",
+                         help="set, build, rebuild, judge: the canary's slot (a, as ever, or b)")
++    parser.add_argument("--arm-settings", type=Path, help="pinned per-arm trip/coach modes as JSON")
+     parser.add_argument("--measure", action="store_true",
+                         help="set: a measurement: --commit played as it is, never built onto "
+                              "the head, never merged, judged and recorded 'measured'")
+@@ -2542,7 +2658,8 @@ def main(argv: list[str]) -> int:
+                             min_s=args.min_h * 3600 if args.min_h else None,
+                             max_s=args.max_h * 3600 if args.max_h else None, slot=args.slot,
+                             measure=args.measure, stops=stops if args.measure else None,
+-                            also=also or None)
++                            also=also or None, arm_settings=(json.loads(args.arm_settings.read_text())
++                                                           if args.arm_settings else None))
+         print(json.dumps(doc))
+         return 0
+     if args.command == "status":
+diff --git a/hive/farm.py b/hive/farm.py
+index 9ee150f..84fef2f 100644
+--- a/hive/farm.py
++++ b/hive/farm.py
+@@ -129,7 +129,8 @@ class Farm:
+         # the relay, which starts one of its own when the path server is not up.
+         self.query = MmapQuery(RELAY, MMAPS)
+         self.facts, self.needs, self.memory = Facts(), QuestNeeds(), Memory.open()
+-        self.senses = Senses.load()
++        from hive.trials import learning_root
++        self.senses = Senses.load(learning_root() / "senses.json")
+         self.status: dict[str, dict] = {}
+         self._lock = threading.Lock()
+         # Bots come and go while the farm plays (`hive.roster`): a newcomer is picked up at
+@@ -188,8 +189,8 @@ class Farm:
+                     code = run(guid, graph_path=self.guides[guid], run_for=self.session_s, bridge=bridge,
+                                query=self.query, needs=self.needs, facts=self.facts,
+                                learned=self.memory, stop=self.stop, senses=self.senses,
+-                               coach=self.coach if guid in self.coached else None,
+-                               combat=guid in self.coached and guid % COMBAT_EVERY == 0,
++                               coach=self.coach if self._coached(guid) else None,
++                               combat=self._coached(guid) and guid % COMBAT_EVERY == 0,
+                                say=say)
+                     raw = bridge.state(guid)
+             except Exception as exc:                 # a bot's fault is its own, not the farm's
+@@ -257,6 +258,10 @@ class Farm:
+                     self.zone_gap_s, self.stagger_s * len(by_guide)), guid))
+         return sorted(starts)
+ 
++    def _coached(self, guid: int) -> bool:
++        mode = os.environ.get("HIVE_COACH_OVERRIDE", "roster")
++        return mode == "model" or (mode == "roster" and guid in self.coached)
++
+     def ours(self, guid: int) -> bool:
+         """Whether this farm plays `guid`: all of them, or one shard's (`--shard k/N`)."""
+         return self.shard is None or config.shard_of_guid(guid, self.shard[1]) == self.shard[0]
+@@ -314,7 +319,8 @@ class Farm:
+         for thread in list(self.threads):
+             if thread.is_alive() or thread.ident is not None:
+                 thread.join()
+-        counter.stop()
++        if counter is not None:
++            counter.stop()
+         self.query.close()
+         return 0
+ 
+@@ -392,9 +398,15 @@ def main(argv: list[str]) -> int:
+     print(f"hive patches: {', '.join(patches.apply(say=lambda line: None))}", flush=True)
+     # The parity switch, read once at the start (`hive.parity`): HIVE_PARITY, else the knob
+     # `var/parity.json` when it names this process's shard.
++    from hive.trials import configure
++    configure(shard)
+     switch.start(shard, say=lambda line: print(f"farm: {line}", flush=True))
+     halves = coaching.arms(chosen)
+-    coach = coaching.open_coach(say=lambda line: print(f"farm: {line}", flush=True))
++    coach_mode = os.environ.get("HIVE_COACH_OVERRIDE", "roster")
++    coach = (None if coach_mode == "rules" else
++             coaching.open_coach(say=lambda line: print(f"farm: {line}", flush=True)))
++    if coach_mode == "model" and coach is None:
++        raise ValueError("model comparison requires an available coach; refusing silent rules fallback")
+     coached = frozenset(g for g in guides if halves.get(g) == coaching.JEV) if coach else frozenset()
+     print(f"farm: Jev coaches {len(coached)} of {len(guides)} bots", flush=True)
+     print(f"farm: {len(guides)} bots, {args.session:.0f} s sessions, {args.stagger:.0f} s apart, "
+diff --git a/hive/guard.py b/hive/guard.py
+index c4e9a18..d413290 100644
+--- a/hive/guard.py
++++ b/hive/guard.py
+@@ -446,7 +446,7 @@ def _left(left: dict[int, str]) -> dict[str, int]:
+     return dict(out)
+ 
+ 
+-def verdict(scored: dict) -> dict:
++def verdict(scored: dict, *, strict: bool = False) -> dict:
+     """pass, fail or wait, and why, from `score`'s rows (the rule above)."""
+     from hive import canary
+     speed, ev = scored["speed"], scored["events"]
+@@ -472,7 +472,9 @@ def verdict(scored: dict) -> dict:
+     guards = guard_checks(ev)
+     slower = ratio < FAIL_RATIO and high < 1.0
+     broken = [k for k, g in guards.items() if not g["pass"]]
+-    out.update(outcome="fail" if slower or broken else "pass", ratio=round(ratio, 4),
++    noninferior = low >= FAIL_RATIO and all(g["interval"][1] <= g["limit"] for g in guards.values())
++    out.update(outcome="fail" if slower or broken else
++               "wait" if strict and not noninferior else "pass", ratio=round(ratio, 4),
+                interval=[round(low, 4), round(high, 4)], guards=guards,
+                median_index=round(statistics.median(r["index"] for r in speed), 4),
+                median_base_index=round(statistics.median(r["base_index"] for r in speed), 4))
+@@ -579,11 +581,14 @@ def _judge_one(sw: dict, until: float | None, range_from: str, now: float, score
+                    f"are judged with the next")
+         return rec
+     scored = scorer(start, end, since - BASELINE_S, since, log=log)
+-    rec.update(verdict(scored))
++    rec["release_policy"] = 2
++    rec.update(verdict(scored, strict=True))
+     if rec["outcome"] == "fail" and TREND:
+         rec.update(against_trend(rec, scored, scorer(since - GUARD_S, since,
+                                                      since - GUARD_S - BASELINE_S,
+                                                      since - GUARD_S, log=log)))
++        if rec.get("explained"):
++            rec.update(outcome="wait", why="trend may explain the decline; noninferiority remains unproved")
+     if rec["outcome"] != "wait":
+         return rec
+     if rec["pending"] or end < hard_end:
+@@ -593,7 +598,8 @@ def _judge_one(sw: dict, until: float | None, range_from: str, now: float, score
+         # judged with the next (that compares the next against it): passed, as at 12 h.
+         at = (f"after {UNDECIDED_S / 3600:.0f} h" if until is None or until > cap else
+               f"when the next commit ended its window at {(until - since) / 3600:.1f} h")
+-        rec.update(outcome="pass", undecided=True, why=f"undecided {at} ({rec['why']}): passed")
++        rec.update(outcome="inconclusive", undecided=True,
++                   why=f"inconclusive {at} ({rec['why']}): live deployment remains gated")
+     return rec
+ 
+ 
+@@ -613,7 +619,8 @@ def ranges(sws: list[dict], recs: list[dict]) -> list[str]:
+ 
+ 
+ def _said(v: dict) -> str:
+-    what = {"pass": "passes", "fail": "fails", "wait": "waits", "undecided": "is undecided"}
++    what = {"pass": "passes", "fail": "fails", "wait": "waits", "undecided": "is undecided",
++            "inconclusive": "is inconclusive"}
+     return (f"the guard: {v['sha'][:7]} (played from {_stamp(v['since'])}"
+             f"{', a short window' if v.get('short') else ''}) {what[v['outcome']]}"
+             f"{' (undecided)' if v.get('undecided') else ''}: {v['why']}")
+@@ -762,6 +769,8 @@ def passed(sha: str, *, sws: list[dict] | None = None, recs: list[dict] | None =
+         return False, f"{sha[:7]} is not judged yet"
+     if v["outcome"] != "pass":
+         return False, f"{sha[:7]} was judged {v['outcome']}"
++    if v.get("undecided"):
++        return False, "an inconclusive stability result does not qualify live deployment"
+     owed = pending(recs)
+     if owed:
+         return False, f"a revert the guard owes waits ({owed[0]['verdict']['sha'][:7]})"
+diff --git a/hive/reward.py b/hive/reward.py
+index 4a0d73b..673cdd6 100644
+--- a/hive/reward.py
++++ b/hive/reward.py
+@@ -235,7 +235,7 @@ def deaths_by_guid(runs=None, **kwargs) -> dict[int, list[float]]:
+ # -- the reference pace ------------------------------------------------------------------------
+ 
+ def curve(con, table: dict[int, int], *, min_count: int = CURVE_MIN,
+-          top: int = 20) -> dict[int, float]:
++          top: int = 20, before: float | None = None) -> dict[int, float]:
+     """Played seconds from each level to the next at the hive's median pace: over every
+     character the server saw begin both (`dings`, the played time a level began at, read at
+     each poll as `totaltime - leveltime`), the median of the differences. The first
+@@ -243,7 +243,9 @@ def curve(con, table: dict[int, int], *, min_count: int = CURVE_MIN,
+     character still in a level does not count for it: the hive's slowest are missing from the
+     level they are stuck in until they leave it, and the median, not the mean, is taken."""
+     starts: dict[int, dict[int, int]] = defaultdict(dict)
+-    for d in con.execute("select guid, level, played from dings where source = 'server'"):
++    query = "select guid, level, played from dings where source = 'server'"
++    for d in con.execute(query + (" and at <= ?" if before is not None else ""),
++                         (before,) if before is not None else ()):
+         starts[d["guid"]][d["level"]] = d["played"]
+     through: dict[int, list[int]] = defaultdict(list)
+     for levels in starts.values():
+diff --git a/hive/run.py b/hive/run.py
+index 4adcd9b..11e9bc2 100644
+--- a/hive/run.py
++++ b/hive/run.py
+@@ -12,6 +12,7 @@ teacher would cost what the hive exists to save.
+ from __future__ import annotations
+ 
+ import argparse
++import os
+ import sys
+ import threading
+ import time
+@@ -61,7 +62,8 @@ def area_bounds() -> dict:
+ 
+ def paths_for(key: int) -> dict[str, Path]:
+     """Where one hive character keeps what the live bot keeps under `var/playheads`."""
+-    base = VAR / "characters" / f"character-{key:08x}"
++    from hive.trials import learning_root
++    base = Path(os.environ.get("HIVE_LEARNING_ROOT") or VAR) / "characters" / f"character-{key:08x}"
+     return {"playhead": base.with_suffix(".json"), "bar": base.with_suffix(".bar.json"),
+             "equipped": base.with_suffix(".equipped.json"), "home": base.with_suffix(".home.json"),
+             "purse": base.with_suffix(".purse.json"), "taxi": base.with_suffix(".taxi.json"),
+@@ -131,9 +133,11 @@ class Memory:
+         (`hive.shared`)."""
+         from hive.shared import SharedChoices, SharedRoutes
+ 
+-        VAR.mkdir(parents=True, exist_ok=True)
+-        return cls(SharedChoices(VAR / "choices.json"), DangerMap(VAR / "danger.json"),
+-                   SharedRoutes(VAR / "route-memory.json"), threading.Lock())
++        from hive.trials import learning_root
++        root = learning_root()
++        root.mkdir(parents=True, exist_ok=True)
++        return cls(SharedChoices(root / "choices.json"), DangerMap(root / "danger.json"),
++                   SharedRoutes(root / "route-memory.json"), threading.Lock())
+ 
+     def keep_counted(self, every_s: float, *, runs: Path = RUNS, bounds_for=None,
+                      say=print):
+@@ -141,6 +145,9 @@ class Memory:
+         the first at once (a farm's); the sessions only read it. The counter."""
+         from hive.shared import DangerCounter
+ 
++        if os.environ.get("HIVE_TRIAL_TOKEN", "-") != "-":
++            return None  # trial danger state is frozen, never counted from other arms' runs
++
+         if self.counter is None:
+             runs.mkdir(parents=True, exist_ok=True)
+             self.counter = DangerCounter(self.danger, runs, bounds_for or area_bounds().get,
+@@ -197,12 +204,18 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
+             client.restore_trail()
+         client.bar_file = files["bar"]
+         client.set_bar(client.strip.bar)
++        from hive.trials import route_path
++        graph_path = route_path(graph_path)
+         graph = Graph.load(graph_path)
+         args = SimpleNamespace(playhead=files["playhead"], graph=graph_path,
+                                route_mode="supported",
+                                world_db=FOREVER / "data" / "knowledge" / "tbc-243.sqlite")
+         level = values.get("char.level")
+         path, memory, route, graph = cli.remembered(args, graph, character, level)
++        frozen_graph = route_path(args.graph)
++        if frozen_graph != args.graph and Graph.load(args.graph) != Graph.load(frozen_graph):
++            raise ValueError("guide handoff changed a frozen trial input")
++        args.graph = frozen_graph
+         say(f"{name} (guid {guid}, level {level}): {graph.graph_id}, step {memory.step_id}"
+             + (f"; parity: {', '.join(sorted(client.parity))}" if client.parity else ""))
+         zones = bounds_by_radio_id(str(ZONES))
+@@ -212,7 +225,7 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
+             return 2
+         RUNS.mkdir(parents=True, exist_ok=True)
+         learned = learned or Memory.open()
+-        if learned.counter is None:
++        if learned.counter is None and not os.environ.get("HIVE_LEARNING_ROOT"):
+             from hive.shared import count_into
+ 
+             with learned.counting:
+@@ -221,19 +234,34 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
+         # The pull-risk table (`hive.pullrisk`, Jev's V461): walks priced through the places they
+         # cross (V463) and plates ranked by it (V462); a Jev from before has no reader, and with
+         # no file both are as before.
+-        risks = pull_risks(VAR / "pull-risk.json")
++        from hive.trials import learning_root
++        learning = learning_root()
++        risks = pull_risks(learning / "pull-risk.json")
+         with_server_travel(client, bounds, query, arrival_yards=GOSSIP_YARDS, say=say,
+                            route_memory=learned.routes, danger=learned.danger, risks=risks)
+-        body = ServerBody(client, graph, facts=facts, senses=senses or Senses.load(),
++        body = ServerBody(client, graph, facts=facts, senses=senses or Senses.load(learning / "senses.json"),
+                           travel_timeout=travel_timeout,
+                           hunt_timeout=hunt_timeout, say=say,
+                           hunt_spawns=spawns.load(args.graph),
+-                          gear_memory=files["equipped"], merchant_memory=VAR / "merchant-memory.json",
++                          gear_memory=files["equipped"], merchant_memory=learning / "merchant-memory.json",
+                           home_memory=files["home"], purse_memory=files["purse"],
+                           taxi_memory=files["taxi"])
++        if os.environ.get("HIVE_LEARNING_ROOT"):
++            from jev.run.body import LiveBody
++            body.EXPLORE = LiveBody.EXPLORE
++            body.UNIFORM = LiveBody.UNIFORM
+         if risks is not None and hasattr(body.fight, "risks"):
+             body.fight.risks = risks
+         recorder = Recorder(root=RUNS)
++        from hive.trials import record_environment
++        import hashlib
++        import random
++        seed=int.from_bytes(hashlib.sha256(f"{os.environ.get('HIVE_TRIAL_TOKEN', '-').split(':')[0]}:{guid}".encode()).digest()[:8], "big")
++        body.choice_rng=random.Random(seed)
++        record_environment(recorder, graph=graph,
++                paths=(args.graph, learning / "choices.json", learning / "danger.json",
++                       learning / "route-memory.json", learning / "values.json", learning / "senses.json"),
++                parity=client.parity, coach=coach, guid=guid, seed=seed)
+         # What the hive measured each quest and grind to be worth (`hive.values`): Jev's judge
+         # reads it (V312), and a Jev whose grind choice values quest areas reads it there (V422);
+         # a Jev from before V312 has no reader.
+@@ -241,7 +269,7 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
+             from jev.learn.values import Values
+         except ImportError:
+             Values = None
+-        values = shared_values(VAR / "values.json", Values) if Values is not None else None
++        values = shared_values(learning / "values.json", Values) if Values is not None else None
+         # Jev, for a character in its half of the comparison (`hive.farm`): what to arm next
+         # and the learned choices are its picks, as they are the live bot's.
+         judge = None
+@@ -286,7 +314,11 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
+             # A level's rib valued by what its kills paid the hive an hour net of death time
+             # (`hive.ribyield`, Jev's V392); a Jev from before has no reader, and with no file
+             # the rib choice is as before.
+-            **rib_yields(VAR / "rib-yield.json"),
++            **rib_yields(learning / "rib-yield.json"),
++            **({"trip_mode": os.environ.get("JEV_TRIPS", "shadow"),
++                "trip_position": body.trip_position, "trip_services": body.trip_services,
++                "trip_map_id": client.bounds.map_id}
++               if "trip_mode" in ClientRuntime.__dataclass_fields__ else {}),
+             # And the quest areas of quests held or to be taken now as grind spots, valued with
+             # the value table's hand-ins an hour (Jev's V422); a Jev from before has no field, and
+             # with no table only the ribs are grinds.
+diff --git a/hive/trials.py b/hive/trials.py
+new file mode 100644
+index 0000000..da6d46c
+--- /dev/null
++++ b/hive/trials.py
+@@ -0,0 +1,401 @@
++"""Versioned, isolated comparisons. Historical canary records remain protocol 1.
++
++Protocol 2 pins inputs before play, isolates learned files by arm, uses one observation
++contract for both arms, and evaluates a fixed window at the process assignment unit.
++"""
++from __future__ import annotations
++
++import hashlib
++import json
++import os
++import random
++import shutil
++import statistics
++import time
++from pathlib import Path
++
++from hive import config
++
++PROTOCOL = 2
++MEMORIES = ("choices.json", "danger.json", "route-memory.json", "values.json",
++            "merchant-memory.json", "pull-risk.json", "rib-yield.json", "senses.json")
++
++
++def sha(path):
++    h = hashlib.sha256()
++    with Path(path).open("rb") as stream:
++        for block in iter(lambda: stream.read(1024 * 1024), b""):
++            h.update(block)
++    return h.hexdigest()
++
++
++def prepare(doc, *, var=None, pace=None):
++    """Write-once inputs, identical initial learning in both arms, no active-file writes."""
++    from hive import parity
++    settings = doc.get("arm_settings", {})
++    if set(settings) - {"candidate", "control"}:
++        raise ValueError("unknown experiment arm")
++    for options in settings.values():
++        if (set(options) - {"trip_mode", "coach"}
++                or options.get("trip_mode", "shadow") not in ("off", "shadow", "active")
++                or options.get("coach", "roster") not in ("roster", "rules", "model")):
++            raise ValueError("invalid pinned arm settings")
++    var = Path(var or config.VAR)
++    ident = f"{int(doc['set'] * 1000)}-{doc['commit'][:12]}"
++    root = var / "trials" / ident
++    root.mkdir(parents=True, exist_ok=False)
++    frozen = root / "inputs"
++    frozen.mkdir()
++    hashes = {}
++    for name in MEMORIES:
++        source = var / name
++        if source.is_file():
++            shutil.copy2(source, frozen / name)
++            hashes[name] = sha(frozen / name)
++    characters = var / "characters"
++    if characters.is_dir():
++        (frozen / "characters").mkdir()
++        for source in sorted(characters.glob("*.json")):
++            target = frozen / "characters" / source.name
++            shutil.copy2(source, target)
++            hashes["characters/" + source.name] = sha(target)
++    route_source = config.HOME / "content" / "routes"
++    (frozen / "routes").mkdir()
++    sources = {p.name: p for folder in (config.JEV / "content" / "tbc",
++                                       config.HOME / "content" / "guides", route_source)
++               for p in folder.glob("*.json")}
++    for source in sorted(sources.values()):
++        target = frozen / "routes" / source.name
++        shutil.copy2(source, target)
++        hashes["routes/" + source.name] = sha(target)
++    for arm in ("candidate", "control"):
++        dest = root / arm
++        dest.mkdir()
++        if (frozen / "characters").is_dir():
++            shutil.copytree(frozen / "characters", dest / "characters")
++        for name in MEMORIES:
++            if (frozen / name).exists():
++                shutil.copy2(frozen / name, dest / name)
++    if pace is None:
++        from hive import lineage, reward
++        from hive.canary import sqlite_ro
++        from hive.calibrate import xp_table
++        pace = {}
++        if lineage.DB.exists():
++            con = sqlite_ro(lineage.DB)
++            try:
++                pace = reward.curve(con, xp_table(), before=doc["set"])
++            finally:
++                con.close()
++    manifest = {"protocol": PROTOCOL, "id": ident, "set": doc["set"],
++                "candidate": doc["commit"], "control": doc["base"],
++                "seed": doc["assignment_seed"], "procs": doc["procs"], "of": doc["of"],
++                "target": doc.get("target"), "measure": bool(doc.get("measure")), "arm_settings": settings,
++                "hive_code": code_identity(config.HOME),
++                "world": artifact(config.FOREVER / "data" / "knowledge" / "tbc-243.sqlite"),
++                "choice_seed": "sha256(trial id:character guid)", "python_hash_seed": 0,
++                "cohort": doc.get("cohort", []), "normalization": pace,
++                "parity": sorted(parity.ALL), "tier": "client-contract-simulator",
++                "danger_learning": "frozen during comparison", "inputs": hashes,
++                "unit": "farm process", "window_s": doc.get("min_s", 6 * 3600),
++                "metric": "normalized progress / actual played time",
++                "utility_death_penalty_s": 120,
++                "environment_interference": "shared realm; cluster analysis cannot remove spawn interference"}
++    path = root / "manifest.json"
++    path.write_text(json.dumps(manifest, indent=2) + "\n")
++    return {"protocol": PROTOCOL, "trial_id": ident, "trial_manifest": str(path),
++            "trial_manifest_sha256": sha(path)}
++
++
++def read(doc):
++    path = Path(doc["trial_manifest"])
++    if sha(path) != doc["trial_manifest_sha256"]:
++        raise ValueError("trial manifest changed after assignment")
++    manifest = json.loads(path.read_text())
++    for key, field in (("candidate", "commit"), ("control", "base"),
++                       ("procs", "procs"), ("of", "of"), ("cohort", "cohort"),
++                       ("seed", "assignment_seed"), ("target", "target")):
++        if manifest.get(key) != doc.get(field):
++            raise ValueError(f"trial assignment changed: {field}")
++    if manifest.get("arm_settings", {}) != doc.get("arm_settings", {}):
++        raise ValueError("trial arm settings changed after assignment")
++    return manifest
++
++
++def active(docs=None):
++    if docs is None:
++        from hive import canary
++        docs = [canary.load(canary.slot_path(s)) for s in canary.SLOTS]
++    found = [d for d in docs if d and d.get("protocol") == PROTOCOL]
++    if len(found) > 1:
++        raise ValueError("isolated comparisons require one active trial")
++    return found[0] if found else None
++
++
++def token(shard, docs=None):
++    doc = active(docs)
++    if doc is None or shard is None:
++        return "-"
++    k, n = shard
++    if n != doc["of"]:
++        raise ValueError("farm split differs from the trial assignment")
++    arm = "candidate" if k in doc["procs"] else "control"
++    return doc["trial_id"] + ":" + arm
++
++
++def configure(shard):
++    # A queued candidate does not change farms until the scheduler admits its suite.
++    if os.environ.get("HIVE_TRIAL_TOKEN", "-") == "-":
++        return
++    doc = active()
++    if doc is None:
++        raise ValueError("trial assignment no longer exists; restart under the scheduler")
++    manifest = read(doc)
++    if code_identity(config.HOME) != manifest["hive_code"]:
++        raise ValueError("hive adapter changed after assignment")
++    world = manifest.get("world", {})
++    if world.get("sha256") and sha(world["path"]) != world["sha256"]:
++        raise ValueError("world catalog changed after assignment")
++    if not manifest["normalization"]:
++        raise ValueError("trial has no frozen reference curve; prepare a new measured comparison")
++    expected = token(shard, [doc])
++    if os.environ.get("HIVE_TRIAL_TOKEN") != expected:
++        raise ValueError("farm must restart under the recorded trial assignment")
++    root = Path(doc["trial_manifest"]).parent
++    arm = expected.rsplit(":", 1)[1]
++    settings = manifest.get("arm_settings", {}).get(arm, {})
++    os.environ["JEV_TRIPS"] = settings.get("trip_mode", "shadow")
++    os.environ["HIVE_COACH_OVERRIDE"] = settings.get("coach", "roster")
++    os.environ["HIVE_LEARNING_ROOT"] = str(root / arm)
++    os.environ["HIVE_PARITY"] = ",".join(manifest["parity"])
++    os.environ["HIVE_TRIAL_INPUTS"] = str(root / "inputs")
++    os.environ["HIVE_TRIAL_MANIFEST"] = doc["trial_manifest"]
++    for name, expected_hash in manifest["inputs"].items():
++        if sha(root / "inputs" / name) != expected_hash:
++            raise ValueError(f"frozen trial input changed: {name}")
++
++
++def learning_root():
++    return Path(os.environ.get("HIVE_LEARNING_ROOT") or config.VAR)
++
++
++def route_path(path):
++    root = os.environ.get("HIVE_TRIAL_INPUTS")
++    if not root:
++        return path
++    frozen = Path(root) / "routes" / Path(path).name
++    if not frozen.exists():
++        raise ValueError(f"route {Path(path).name} was not frozen for this trial")
++    return frozen
++
++
++def cluster_interval(a, b, statistic, *, seed=11, draws=2000):
++    """Resample the assigned processes, preserving all characters in each process."""
++    def group(rows):
++        result = {}
++        for row in rows:
++            result.setdefault(row["cluster"], []).append(row)
++        return list(result.values())
++    left, right = group(a), group(b)
++    if min(len(left), len(right)) < 3:
++        return None
++    rng = random.Random(seed)
++    samples = sorted(statistic([r for g in rng.choices(left, k=len(left)) for r in g],
++                               [r for g in rng.choices(right, k=len(right)) for r in g])
++                     for _ in range(draws))
++    return [samples[int(draws * .05)], samples[min(draws - 1, int(draws * .95))]]
++
++
++def evaluate(events, speed, *, decide="speed", correctness=False):
++    from hive import canary
++    a, b = speed["candidate"], speed["control"]
++    enough = (min(len(a), len(b)) >= canary.MIN_CHARACTERS
++              and min(sum(r["played_s"] for r in rows) / 3600 for rows in (a,b)) >= canary.MIN_HOURS)
++    def speed_difference(left, right):
++        copied = {"candidate":[dict(r) for r in left], "control":[dict(r) for r in right]}
++        canary.adjust(copied)  # refit the adjustment inside every bootstrap
++        return (statistics.median(r["adjusted"] for r in copied["candidate"])
++                - statistics.median(r["adjusted"] for r in copied["control"]))
++    interval = cluster_interval(a, b, speed_difference) if enough else None
++    baseline = statistics.median(r["base_index"] for r in b) if b else 0
++    checks = {"speed": {"interval": interval, "floor": -.05 * baseline,
++                         "difference": speed_difference(a,b) if a and b else None}}
++    for key in ("deaths", "idle", "stuck", "target"):
++        rows_a, rows_b = events["candidate"], events["control"]
++        # A degenerate bootstrap of rare/absent events cannot establish noninferiority.
++        enough_events = all(sum(r.get(k, 0) for r in rows) >= 10
++                            for rows in (rows_a, rows_b) for k in (key, "b" + key))
++        bounds = (cluster_interval(rows_a, rows_b, lambda x,y: canary.rate_ratio(x,y,key))
++                  if enough_events else None)
++        checks[key] = {"interval": bounds, "ratio":canary.rate_ratio(rows_a, rows_b, key), "limit": 1.25 if key != "target" else 1.0}
++    noninferior = interval is not None and interval[0] > checks["speed"]["floor"]
++    noninferior &= all(checks[k]["interval"] is not None and checks[k]["interval"][1] <= 1.25
++                       for k in ("deaths", "idle", "stuck"))
++    improved = (interval is not None and interval[0] > 0 if decide == "speed" else
++                checks["deaths" if decide == "deaths" else "target"]["interval"] is not None
++                and checks["deaths" if decide == "deaths" else "target"]["interval"][1] < 1)
++    harmful = interval is not None and interval[1] < checks["speed"]["floor"]
++    harmful |= any(checks[k]["interval"] is not None and checks[k]["interval"][0] > 1.25
++                   for k in ("deaths", "idle", "stuck"))
++    status = ("harmful" if harmful else "improved" if noninferior and improved else
++              "noninferior" if noninferior else "inconclusive")
++    kept = status == "improved" or (correctness and status == "noninferior")
++    primary = {arm: {"characters":len(rows), "hours":sum(r["played_s"] for r in rows)/3600,
++                     "median_actual_time_index":statistics.median(r["index"] for r in rows) if rows else None,
++                     "median_utility_index":statistics.median(r.get("utility_index", r["index"]) for r in rows) if rows else None}
++               for arm, rows in speed.items()}
++    return {"primary": primary, "protocol": PROTOCOL, "status": status, "outcome": "kept" if kept else
++            "not kept" if harmful else "not enough evidence", "checks": checks,
++            "why": f"{status}: actual played time; process-cluster intervals; fixed window"}
++
++
++
++
++def coverage(doc, speed):
++    """Retain unobserved assigned characters in the report; never call them successes."""
++    result = {}
++    for arm in ("candidate", "control"):
++        assigned = [g for g in doc.get("cohort", [])
++                    if (config.shard_of_guid(g, doc["of"]) in doc["procs"]) == (arm == "candidate")]
++        observed = {r.get("guid") for r in speed.get(arm, [])}
++        result[arm] = {"assigned": len(assigned), "observed": len(observed - {None}),
++                       "unobserved_or_censored": sorted(set(assigned) - observed)}
++    return result
++
++
++def save_result(doc, result):
++    path = Path(doc["trial_manifest"]).parent / "verdict.json"
++    payload = json.dumps(result, indent=2, sort_keys=True) + "\n"
++    if path.exists() and path.read_text() != payload:
++        raise ValueError("trial already has a different final verdict")
++    path.write_text(payload)
++
++
++def measure(doc, now, *, dry_run, log, scorer, slot, target=None, stop=None):
++    """Measurement-only arm of the same fixed protocol; never merges any code."""
++    from hive import canary, reward
++    contract = read(doc)
++    until = doc["since"] + contract["window_s"]
++    if stop is None and (not doc.get("started") or now < until + reward.SETTLE_S):
++        return None
++    result = {"protocol": PROTOCOL, "status": "inconclusive", "checks": {},
++              "outcome": "not enough evidence", "why": "comparison stopped before qualification"}
++    if stop is None:
++        ev, sp, excluded, pending = scorer(contract["target"], doc["since"], until,
++                       doc["procs"], doc["of"], log=log, others=(),
++                       frozen_pace=contract["normalization"], cohort=contract["cohort"],
++                       actual_time=True)
++        if pending and now - doc["since"] < doc.get("max_s", canary.CANARY_MAX_S):
++            return {"outcome": "waiting", "why": f"{pending} fixed-window runs unread"}
++        if not pending:
++            result = evaluate(ev, sp, decide=(contract["target"] or {}).get("decide", "speed"))
++        result["coverage"] = coverage(doc, sp)
++        result["milestones"] = milestones(doc, until)
++        result["left_out"] = excluded
++    else:
++        result["stopped"] = stop
++    result.update(trial_manifest=doc["trial_manifest"],
++                  trial_manifest_sha256=doc["trial_manifest_sha256"],
++                  window=[doc["since"], min(now, until)], target=contract["target"])
++    if target is not None and target != contract["target"]:
++        raise ValueError("fixed measurement target cannot change after assignment")
++    result = canary.measured(result)
++    if not dry_run:
++        save_result(doc, result)
++        canary.record({**result, "at": now, "stage": canary.MEASURE_STAGE,
++                       "branch": doc["branch"], "commit": doc["commit"], "merged": False})
++        canary._decide(doc, result, now)
++        canary.clear(canary.slot_path(slot))
++    log(result["why"])
++    return result
++
++
++def artifact(path):
++    path = Path(path)
++    return {"path":str(path), "sha256":sha(path)} if path.is_file() else {"path":str(path),"missing":True}
++
++
++def code_identity(root):
++    import subprocess
++    try:
++        def git(*args):
++            return subprocess.check_output(["git", "-C", str(root), *args],
++                                           stderr=subprocess.DEVNULL, timeout=5)
++        patch=git("diff", "HEAD", "--", ".")
++        extra=git("ls-files", "--others", "--exclude-standard", "--", "hive/*.py", "jev/*.py")
++        return {"commit":git("rev-parse", "HEAD").decode().strip(),
++                "dirty":bool(patch or extra), "patch_sha256":hashlib.sha256(patch).hexdigest(),
++                "untracked_source":{p:sha(Path(root)/p) for p in extra.decode().splitlines()}}
++    except (OSError, subprocess.SubprocessError):
++        return {"unavailable":True}
++
++
++def record_environment(recorder, *, graph, paths, parity, coach, guid, seed):
++    evidence={"contract_version":1, "tier":"client-contract-simulator" if parity else "fast-simulator",
++              "code":code_identity(config.JEV), "hive_code":code_identity(config.HOME),
++              "graph_sha256":hashlib.sha256(graph.model_dump_json().encode()).hexdigest(),
++              "artifacts":[artifact(p) for p in paths],
++              "settings":{"parity":sorted(parity), "coach":"model" if coach else "rules",
++                          "trial":os.environ.get("HIVE_TRIAL_TOKEN"), "guid":guid,
++                          "choice_seed":seed, "python_hash_seed":os.environ.get("PYTHONHASHSEED"),
++                          "trip_mode":os.environ.get("JEV_TRIPS", "shadow"),
++                          "trial_manifest":os.environ.get("HIVE_TRIAL_MANIFEST")}}
++    if hasattr(recorder, "environment"):
++        recorder.environment(evidence)
++    else:
++        # Older control code still gets the same manifest, before its first tick.
++        path=recorder.dir/"manifest.json"
++        data=json.loads(path.read_text())
++        if "environment" in data and data["environment"] != evidence:
++            raise ValueError("run environment already sealed")
++        data["environment"]=evidence
++        path.write_text(json.dumps(data, indent=2)+"\n")
++
++
++
++
++def milestones(doc, until, *, db=None):
++    """Next-level endpoints for the full assigned cohort, including right censoring."""
++    from hive import lineage
++    from hive.canary import sqlite_ro
++    db = Path(db or lineage.DB)
++    if not db.exists():
++        return {"available":False, "reason":"no lineage evidence"}
++    con=sqlite_ro(db)
++    rows=[]
++    try:
++        for guid in doc.get('cohort', []):
++            arm='candidate' if config.shard_of_guid(guid,doc['of']) in doc['procs'] else 'control'
++            row={'guid':guid,'arm':arm,'censored':True,'played_s':None}
++            baseline=con.execute('select level,played,at from samples where guid=? and at<=? order by at desc limit 1',
++                                 (guid,doc['since'])).fetchone()
++            if baseline is None or doc['since']-baseline['at']>7200:
++                row['reason']='no fresh baseline'
++                rows.append(row)
++                continue
++            row['target_level']=baseline['level']+1
++            endpoint=con.execute('select played,at from dings where guid=? and level>=? and at>? and at<=? order by at limit 1',
++                                  (guid,row['target_level'],doc['since'],until)).fetchone()
++            if endpoint is not None:
++                row.update(censored=False,played_s=max(0,endpoint['played']-baseline['played']))
++            else:
++                last=con.execute('select played from samples where guid=? and at>? and at<=? order by at desc limit 1',
++                                  (guid,doc['since'],until)).fetchone()
++                if last is not None:
++                    row['played_s']=max(0,last['played']-baseline['played'])
++                row['reason']='next level not observed before fixed-window end'
++            rows.append(row)
++    finally:
++        con.close()
++    return {'available':True,'endpoint':'next level from pre-window baseline',
++            'interpretation':'right-censored observations; completion-only means are not a speed estimate',
++            'rows':rows}
++
++
++if __name__ == "__main__":
++    import argparse
++    parser = argparse.ArgumentParser()
++    parser.add_argument("command", choices=["token"])
++    parser.add_argument("--shard", required=True)
++    args = parser.parse_args()
++    print(token(tuple(int(x) for x in args.shard.split("/"))))
+diff --git a/ops/tick.sh b/ops/tick.sh
+index 3df9633..802b053 100755
+--- a/ops/tick.sh
++++ b/ops/tick.sh
+@@ -120,12 +120,13 @@ canary_farms() { for p in $(pgrep -f "[p]ython -m hive.farm"); do
+ canary_doc() { [ "$1" = a ] && echo "$VAR/canary.json" || echo "$VAR/canary-$1.json"; }
+ canary_named() { [ -e "$VAR/canary.json" ] || [ -e "$VAR/canary-b.json" ]; }
+ # Each farm process for hive.canary's plan: its pid, shard (k/N), checkout, and 1 when draining.
++farm_trial() { tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null | sed -n 's/^HIVE_TRIAL_TOKEN=//p'; }
+ farm_procs() { for p in $(pgrep -f "[p]ython -m hive.farm"); do
+-  echo "$p $(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -o -- "--shard [0-9]*/[0-9]*" | cut -d' ' -f2 | grep . || echo -) $(farm_tree "$p" | grep . || echo -) $([ -e "$VAR/drain/$p" ] && echo 1 || echo 0)"; done; }
+-start_farm() {  # k n checkout
++  echo "$p $(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -o -- "--shard [0-9]*/[0-9]*" | cut -d' ' -f2 | grep . || echo -) $(farm_tree "$p" | grep . || echo -) $([ -e "$VAR/drain/$p" ] && echo 1 || echo 0) $(farm_trial "$p" | grep . || echo -)"; done; }
++start_farm() {  # k n checkout [immutable trial token]
+   say "farm process $1 of $2 is not playing: starting it on $3"
+   (cd "$HERE" && echo 500 > /proc/self/oom_score_adj && "$HERE/ops/slice.sh" run "farm-$1" \
+-    env HIVE_JEV="$3" setsid nohup "$PY" -m hive.farm "${FARM_ARGS[@]}" \
++    env HIVE_JEV="$3" PYTHONHASHSEED=0 HIVE_TRIAL_TOKEN="${4:--}" setsid nohup "$PY" -m hive.farm "${FARM_ARGS[@]}" \
+     --shard "$1/$2" >> "$VAR/logs/farm-$1.out" 2>&1 < /dev/null &) 9>&-
+ }
+ tree() { sed -n 's/.*"tree": "\([^"]*\)".*/\1/p' "$VAR/playing.json" 2>/dev/null | grep . || echo "${TREES[0]}"; }
+@@ -362,10 +363,10 @@ if [ ! -e "$VAR/STOP" ] && bridge_up; then
+         --playing "$playing_tree" 2>> "$VAR/logs/autofix.log" 9>&-)); then
+       planned=1
+       mkdir -p "$VAR/drain"
+-      while read -r verb a b c; do
++      while read -r verb a b c contract; do
+         case "$verb" in
+-          drain) say "farm process $a drains: $b $c"; date > "$VAR/drain/$a" ;;
+-          start) start_farm "$a" "$b" "$c" ;;
++          drain) say "farm process $a drains: $b $c $contract"; date > "$VAR/drain/$a" ;;
++          start) start_farm "$a" "$b" "$c" "${contract:--}" ;;
+         esac
+       done <<< "$moves"
+     else
+@@ -491,6 +492,17 @@ if [ ! -e "$VAR/DEPLOY_STOP" ] && [ -n "$head" ] && [ "$played" = "$head" ]; the
+       && [ $(( $(date +%s) - since )) -ge "$SOAK_S" ] && [ "$(server_up_s)" -ge "$SOAK_S" ] \
+       && ! pgrep -f "[t]ools/deploy.sh" > /dev/null \
+       && guarded=$(cd "$HERE" && timeout 120 "$PY" -m hive.guard passed "$head" 2>&1); then
++    # Check the candidate's own qualification before invoking an older live deploy script.
++    if git -C "$FOREVER" cat-file -e "$head:tools/release_gate.py" 2>/dev/null; then
++      gate_file=$(mktemp)
++      if ! git -C "$FOREVER" show "$head:tools/release_gate.py" > "$gate_file" \
++          || ! "$PY" "$gate_file" --record "$FOREVER/var/releases/$head.json" --commit "$head"; then
++        rm -f "$gate_file"
++        say "candidate lacks complete matched-client release qualification"
++        exit 0
++      fi
++      rm -f "$gate_file"
++    fi
+     say "the hive has played ${head:0:7} $(( ($(date +%s) - since) / 3600 )) h, its suite passed, the guard passed it ($guarded): deploying it to the live bot"
+     (cd "$FOREVER" && setsid nohup tools/deploy.sh "$head" "$suite" >> "$VAR/logs/deploy.log" 2>&1 < /dev/null &) 9>&-
+   fi
+diff --git a/tests/test_canary.py b/tests/test_canary.py
+index 39cb765..49c3179 100644
+--- a/tests/test_canary.py
++++ b/tests/test_canary.py
+@@ -229,7 +229,7 @@ def test_a_candidate_is_named_on_three_of_the_farms_processes(var, monkeypatch):
+     monkeypatch.setattr(canary, "branch_head", lambda dev=None: "b" * 40)
+     said = []
+     monkeypatch.setattr(canary, "say", said.append)
+-    doc = canary.set_candidate("auto/x", SHA, guids=range(1, 316), procs=8, now=10.0)
++    doc = canary.set_candidate("auto/x", SHA, guids=range(1, 316), procs=8, now=10.0, protocol=1)
+     assert canary.load() == doc and doc["of"] == 8 and len(doc["procs"]) == 3
+     assert "shard" not in doc and "processes" in said[-1] and "of 315 characters" in said[-1]
+     assert "of 8" in canary.status(now=20.0)[0]
+@@ -645,6 +645,7 @@ def test_a_queued_old_branch_is_built_on_the_actual_control_before_play_or_judge
+     queue.write_text(json.dumps({"branch": "auto/1", "commit": fix, "target": str(target)}) + "\n")
+     canary.next_bets(queue)
+     doc = canary.load()
++    doc.pop("protocol", None)  # historical rebuild compatibility; isolated contracts tested separately
+     assert doc["base"] == head and doc["commit"] == fix
+     doc.update(started=started, since=10.0, set=10.0)
+     canary.save(doc)
+@@ -916,7 +917,7 @@ def test_two_slots_are_planned_disjoint_the_farm_kept_at_eight(var, tmp_path, mo
+     _slot_doc(var, "a", (2, 5, 7))
+     # Slot b named beside it: three of the other five, none of slot a's.
+     doc_b = canary.set_candidate("bet-b", SHA, guids=range(1, 316), procs=8, now=50.0,
+-                                 slot="b")
++                                 slot="b", protocol=1)
+     assert canary.load(canary.CANARY_B) == doc_b and doc_b["slot"] == "b"
+     kb = set(doc_b["procs"])
+     assert len(kb) == 3 and not kb & {2, 5, 7} and doc_b["of"] == 8
+@@ -976,12 +977,12 @@ def test_a_slot_picked_beside_a_playing_one_takes_what_that_one_lost_first(var,
+     canary.ARMS.write_text(json.dumps({"branch": "bet-old", "procs": [0, 2, 3], "of": 8,
+                                        "since": canary.ARMS_EPOCH + 900.0,
+                                        "until": canary.ARMS_EPOCH + 5000.0}) + "\n")
+-    doc = canary.set_candidate("bet-a", SHA, guids=range(1, 316), procs=8, now=now)
++    doc = canary.set_candidate("bet-a", SHA, guids=range(1, 316), procs=8, now=now, protocol=1)
+     assert set(doc["procs"]) == {0, 2, 3} and "slot" not in doc
+     # With nothing lost yet, the nearest share of the five left.
+     canary.clear(canary.CANARY)
+     canary.ARMS.write_text("")
+-    doc = canary.set_candidate("bet-a", SHA, guids=range(1, 316), procs=8, now=now)
++    doc = canary.set_candidate("bet-a", SHA, guids=range(1, 316), procs=8, now=now, protocol=1)
+     assert len(doc["procs"]) == 3 and not set(doc["procs"]) & {1, 6, 7}
+ 
+ 
+@@ -1050,17 +1051,16 @@ def test_the_next_bet_fills_either_free_slot_from_the_one_queue(var, monkeypatch
+     assert canary.load(canary.CANARY)["branch"] == "bet-1" and canary.load(canary.CANARY_B) is None
+     assert left() == ["bet-2", "bet-3"]
+     assert canary.main(["next"]) == 0 and left() == ["bet-2", "bet-3"]
+-    # Two in use: slot b takes the next, on three processes of its own.
++    # Isolated comparisons keep the next bet queued even when both slots are enabled.
+     canary.SLOTS_FILE.write_text("2\n")
+     assert canary.main(["next"]) == 0
+-    a, b = canary.load(canary.CANARY), canary.load(canary.CANARY_B)
+-    assert b["branch"] == "bet-2" and b["slot"] == "b" and left() == ["bet-3"]
+-    assert not set(a["procs"]) & set(b["procs"]) and b["min_s"] == 3 * 3600.0
+-    # Slot a judged and free while b plays: a takes the third.
++    assert canary.load(canary.CANARY_B) is None and left() == ["bet-2", "bet-3"]
++    canary.clear(canary.CANARY)
++    assert canary.main(["next"]) == 0
++    assert canary.load(canary.CANARY)["branch"] == "bet-2" and left() == ["bet-3"]
+     canary.clear(canary.CANARY)
+     assert canary.main(["next"]) == 0
+     assert canary.load(canary.CANARY)["branch"] == "bet-3" and left() == []
+-    assert not set(canary.load(canary.CANARY)["procs"]) & set(b["procs"])
+     # A farm with no room for a second candidate leaves the bet queued.
+     canary.clear(canary.CANARY_B)
+     queue.write_text(json.dumps({"branch": "bet-4", "commit": "4" * 40, "target": str(target)})
+@@ -1127,7 +1127,7 @@ def test_slot_a_alone_carries_on_as_it_was(var, tmp_path, monkeypatch):
+     monkeypatch.setattr(canary, "living_guids", lambda: list(range(1, 316)))
+     assert canary.slots_in_use() == ("a",)
+     doc = canary.set_candidate("bet-aggro-3", SHA, guids=range(1, 316), procs=8, now=10.0,
+-                               target=TARGET)
++                               target=TARGET, protocol=1)
+     assert "slot" not in doc and canary.CANARY.exists() and not canary.CANARY_B.exists()
+     ks, _ = canary.pick_set(range(1, 316), 8)
+     assert doc["procs"] == ks
+@@ -1259,7 +1259,7 @@ def test_a_measurement_is_named_to_be_played_as_it_is(var, monkeypatch):
+     monkeypatch.setattr(canary, "branch_head", lambda dev=None: "b" * 40)
+     doc = canary.set_candidate("reverse-old", OLD, target=SPEED, guids=range(1, 241), procs=8,
+                                now=50.0, min_s=8 * 3600, max_s=12 * 3600, measure=True,
+-                               stops={"stop_deaths": 2.0, "stop_deaths_h": None})
++                               stops={"stop_deaths": 2.0, "stop_deaths_h": None}, protocol=1)
+     assert doc["measure"] and doc["commit"] == doc["fix"] == OLD and doc["base"] == "b" * 40
+     assert doc["heads"] == [["b" * 40, 50.0]] and doc["stop_deaths"] == 2.0
+     assert "stop_deaths_h" not in doc and len(doc["procs"]) == 3
+diff --git a/tests/test_danger_count.py b/tests/test_danger_count.py
+index 5f1b044..97c48b3 100644
+--- a/tests/test_danger_count.py
++++ b/tests/test_danger_count.py
+@@ -143,8 +143,6 @@ def test_the_counter_counts_at_once_and_keeps_to_its_lock(tmp_path):
+ def test_a_farms_memory_keeps_one_counter_under_the_sessions_lock(tmp_path):
+     """A farm's memory is counted by one thread of its process (`Memory.keep_counted`), under
+     the lock a session on its own counts under, and a session with a counter never counts."""
+-    import inspect
+-
+     from hive import run as hive_run
+ 
+     now = time.time()
+@@ -161,5 +159,12 @@ def test_a_farms_memory_keeps_one_counter_under_the_sessions_lock(tmp_path):
+         assert memory.danger.cells
+     finally:
+         counter.stop(timeout_s=1.0)
+-    source = inspect.getsource(hive_run.run)
+-    assert "if learned.counter is None:" in source
++
++
++
++def test_trial_danger_cannot_learn_from_runs_written_by_the_other_arm(monkeypatch, tmp_path):
++    from hive import run as hive_run
++    monkeypatch.setenv("HIVE_TRIAL_TOKEN", "trial:candidate")
++    memory=hive_run.Memory(choices=None,danger=DangerMap(),routes=None,counting=threading.Lock())
++    assert memory.keep_counted(60, runs=tmp_path) is None
++    assert memory.counter is None and not memory.danger.cells
+diff --git a/tests/test_guard.py b/tests/test_guard.py
+index 3ae2541..f708cbc 100644
+--- a/tests/test_guard.py
++++ b/tests/test_guard.py
+@@ -175,7 +175,7 @@ def test_a_switch_is_judged_on_its_window_against_the_day_before(var):
+     assert "passes" in guard.KEEP_LOG.read_text()
+ 
+ 
+-def test_a_wait_grows_its_window_and_passes_undecided_at_twelve_hours(var):
++def test_a_wait_becomes_inconclusive_and_cannot_deploy_at_twelve_hours(var):
+     sws = [sw("b" * 40, T0, "a" * 40)]
+     thin = scorer(speed=speed_rows(3), events=event_rows(3))
+     said = []
+@@ -185,9 +185,9 @@ def test_a_wait_grows_its_window_and_passes_undecided_at_twelve_hours(var):
+     assert len(said) == 1                     # one wait said, not one a run
+     v = guard.judge(T0 + guard.UNDECIDED_S + reward.SETTLE_S, sws=sws, scorer=thin,
+                     reverter=no_revert, log=said.append)[0]
+-    assert v["outcome"] == "pass" and v["undecided"] and v["final"]
++    assert v["outcome"] == "inconclusive" and v["undecided"] and v["final"]
+     ok, why = guard.passed("b" * 40, sws=sws)
+-    assert ok and "undecided" in why
++    assert not ok and "inconclusive" in why
+ 
+ 
+ def test_a_later_switch_ends_the_window_short_and_a_thin_one_hands_its_commits_on(var):
+@@ -217,12 +217,12 @@ def test_a_drop_the_hive_was_already_making_before_the_switch_is_not_the_commits
+                                                    trend=speed_rows(ratio=0.8, seed=7)),
+                       reverter=no_revert, log=lambda _: None)
+     v = out[0]
+-    assert v["outcome"] == "pass" and v["explained"] and v["trend"]["speed"]["trend"] < 0.85
++    assert v["outcome"] == "wait" and v["explained"] and v["trend"]["speed"]["trend"] < 0.85
+     assert 0.9 < v["trend"]["speed"]["adjusted"] < 1.1 and "trend" in v["why"]
+     # The trend's window: the 6 h before the switch, against the 24 h before them.
+     assert calls[-1] == (T0 - guard.GUARD_S, T0, T0 - guard.GUARD_S - 24 * H,
+                          T0 - guard.GUARD_S)
+-    assert guard.passed("b" * 40, sws=sws)[0]
++    assert not guard.passed("b" * 40, sws=sws)[0]
+ 
+ 
+ def test_a_drop_beyond_the_trend_fails_and_without_a_trend_the_rule_alone(var):
+@@ -239,7 +239,7 @@ def test_a_drop_beyond_the_trend_fails_and_without_a_trend_the_rule_alone(var):
+     assert v["outcome"] == "fail" and v["trend"] is None and "the rule alone" in v["why"]
+ 
+ 
+-def test_a_long_window_without_a_baseline_passes_undecided_and_hands_nothing_on(var):
++def test_a_long_window_without_a_baseline_is_inconclusive_and_hands_nothing_on(var):
+     a, b, c = ("a" * 40, "b" * 40, "c" * 40)
+     # b played 10 h after a pause (no baseline) before c came: passed undecided, and c's range
+     # is its own; a fail of c reverts nothing of b's.
+@@ -247,7 +247,7 @@ def test_a_long_window_without_a_baseline_passes_undecided_and_hands_nothing_on(
+     thin = scorer(speed=speed_rows(3), events=event_rows(3))
+     out = guard.judge(T0 + 10 * H + reward.SETTLE_S, sws=sws, scorer=thin, reverter=no_revert,
+                       log=lambda _: None)
+-    assert [(v["outcome"], v["undecided"], v["short"]) for v in out] == [("pass", True, False)]
++    assert [(v["outcome"], v["undecided"], v["short"]) for v in out] == [("inconclusive", True, False)]
+     assert "ended its window at 10.0 h" in out[0]["why"]
+     assert guard.ranges(sws, guard.records())[1] == b
+ 
+diff --git a/tests/test_trials.py b/tests/test_trials.py
+new file mode 100644
+index 0000000..cb000e6
+--- /dev/null
++++ b/tests/test_trials.py
+@@ -0,0 +1,146 @@
++import json
++import sqlite3
++
++import pytest
++
++from hive import canary, config, reward, trials
++
++
++def prepared(tmp_path, monkeypatch):
++    monkeypatch.setattr(config, "HOME", tmp_path)
++    monkeypatch.setattr(config, "JEV", tmp_path / "jev")
++    var = tmp_path / "var"
++    var.mkdir()
++    (var / "choices.json").write_text('{"points": {"a": 1}}')
++    (var / "values.json").write_text('{"format": 1}')
++    doc = {"set":10., "commit":"a"*40, "base":"b"*40, "assignment_seed":11,
++           "procs":[0,2,4], "of":8, "cohort":[1,2,3]}
++    doc.update(trials.prepare(doc, var=var, pace={1:100.}))
++    return doc, var
++
++
++def test_trial_arms_start_equal_but_cannot_write_each_others_learning(tmp_path, monkeypatch):
++    doc, var = prepared(tmp_path, monkeypatch)
++    root = __import__('pathlib').Path(doc['trial_manifest']).parent
++    assert (root/'candidate/choices.json').read_bytes() == (root/'control/choices.json').read_bytes()
++    (root/'candidate/choices.json').write_text('{"changed":true}')
++    assert (root/'control/choices.json').read_bytes() == (var/'choices.json').read_bytes()
++    monkeypatch.setattr(trials, "active", lambda docs=None:doc)
++    monkeypatch.setenv("HIVE_TRIAL_TOKEN",trials.token((0,8),[doc]))
++    for name in ("HIVE_LEARNING_ROOT", "HIVE_PARITY", "HIVE_TRIAL_INPUTS", "HIVE_TRIAL_MANIFEST", "JEV_TRIPS", "HIVE_COACH_OVERRIDE"):
++        monkeypatch.setenv(name, "")
++    trials.configure((0,8))
++    assert trials.learning_root() == root/'candidate'
++    import os
++    parts = os.environ["HIVE_PARITY"]
++    monkeypatch.setenv("HIVE_TRIAL_TOKEN",trials.token((1,8),[doc]))
++    trials.configure((1,8))
++    assert trials.learning_root() == root/'control'
++    assert os.environ["HIVE_PARITY"] == parts
++    # configure writes these directly; restore them after this standalone probe.
++    for name in ('HIVE_LEARNING_ROOT','HIVE_PARITY','HIVE_TRIAL_INPUTS','HIVE_TRIAL_MANIFEST'):
++        monkeypatch.delenv(name)
++
++
++def test_frozen_manifest_tampering_and_wrong_assignment_are_rejected(tmp_path, monkeypatch):
++    doc, _ = prepared(tmp_path,monkeypatch)
++    monkeypatch.setattr(trials,"active",lambda docs=None:doc)
++    monkeypatch.setenv("HIVE_TRIAL_TOKEN", "wrong")
++    with pytest.raises(ValueError,match="restart"): trials.configure((0,8))
++    path = __import__('pathlib').Path(doc['trial_manifest'])
++    path.write_text(path.read_text() + ' ')
++    with pytest.raises(ValueError,match="changed"): trials.read(doc)
++
++
++def test_reference_curve_cannot_learn_from_after_assignment():
++    con = sqlite3.connect(':memory:'); con.row_factory=sqlite3.Row
++    con.execute('create table dings(guid integer,level integer,played integer,at real,source text)')
++    con.executemany('insert into dings values(?,?,?,?,?)',[(1,1,0,1,'server'),
++                    (1,2,10,2,'server'),(2,1,0,3,'server'),(2,2,1000,4,'server')])
++    assert reward.curve(con,{1:100},min_count=1,top=1,before=2)[1] == 10
++    assert reward.curve(con,{1:100},min_count=1,top=1)[1] == 505
++
++
++def test_assignment_is_seeded_balanced_and_excludes_reserved_processes():
++    args = dict(n=8,exclude={7},seed=14,strata={g:g%3 for g in range(200)})
++    a=canary.pick_set(range(200),**args)
++    assert a == canary.pick_set(iter(range(200)),**args)
++    assert 7 not in a[0] and len(a[0])==3
++
++
++def arms(gain=0):
++    speed,events={},{}
++    for arm,delta in [('candidate',gain),('control',0)]:
++        speed[arm]=[dict(cluster=k,base_index=1.,index=1.+delta,change=delta,
++                         played_s=7200,base_played_s=7200,deaths=3,base_deaths=3)
++                    for k in range(3) for _ in range(5)]
++        events[arm]=[dict(cluster=k,s=7200,bs=7200,deaths=3,bdeaths=3,
++                          idle=100,bidle=100,stuck=2,bstuck=2,target=10,btarget=10)
++                     for k in range(3) for _ in range(5)]
++    return events,speed
++
++
++def test_identical_code_is_noninferior_but_not_an_improvement():
++    result=trials.evaluate(*arms())
++    assert result['status']=='noninferior' and result['outcome']!='kept'
++    assert trials.evaluate(*arms(.2))['status']=='improved'
++    assert trials.evaluate(*arms(-.2))['status']=='harmful'
++
++
++def test_one_process_cannot_masquerade_as_many_independent_characters():
++    ev,sp=arms(.5)
++    for rows in (*ev.values(),*sp.values()):
++        for row in rows: row['cluster']=0
++    assert trials.evaluate(ev,sp)['status']=='inconclusive'
++
++
++def test_mutated_assignment_and_absent_event_evidence_are_not_qualified(tmp_path,monkeypatch):
++    doc,_=prepared(tmp_path,monkeypatch)
++    doc['procs']=[1,3,5]
++    with pytest.raises(ValueError,match='assignment changed'): trials.read(doc)
++    ev,sp=arms(.2)
++    for rows in ev.values():
++        for row in rows: row['stuck']=row['bstuck']=0
++    assert trials.evaluate(ev,sp)['status']=='inconclusive'
++
++
++def test_fixed_trial_is_not_repicked_to_a_different_process_split():
++    assert canary._repick({'protocol':2},16,lambda _:None) is None
++
++
++def test_pending_contract_does_not_override_an_unassigned_farm(monkeypatch):
++    monkeypatch.setenv('HIVE_TRIAL_TOKEN','-')
++    monkeypatch.setattr(trials,'active',lambda:pytest.fail('pending trial was consulted'))
++    trials.configure((0,8))
++
++
++def test_measurement_uses_fixed_target_window_and_never_calls_merge(tmp_path,monkeypatch):
++    doc,_=prepared(tmp_path,monkeypatch)
++    doc.update(started=True,since=100.,target=None)
++    calls=[]
++    ev,sp=arms(.2)
++    def score(target,since,until,ks,n,**kw):
++        calls.append((since,until,kw))
++        return ev,sp,[],0
++    result=trials.measure(doc,100+21600+10000,dry_run=True,log=lambda _:None,
++                          scorer=score,slot='a')
++    assert result['outcome']=='measured' and not result['merged']
++    assert calls[0][0:2]==(100.,21700.)
++    assert calls[0][2]['actual_time'] and calls[0][2]['cohort']==[1,2,3]
++    with pytest.raises(ValueError,match='target cannot change'):
++        trials.measure(doc,100+21600+10000,dry_run=True,log=lambda _:None,
++                       scorer=score,slot='a',target={'decide':'deaths'})
++
++
++def test_next_level_report_retains_censored_assigned_characters(tmp_path):
++    db=tmp_path/'lineage.sqlite'
++    con=sqlite3.connect(db)
++    con.executescript('create table samples(guid integer,at real,level integer,played real);'
++                      'create table dings(guid integer,level integer,played real,at real);')
++    con.executemany('insert into samples values(?,?,?,?)',[(1,100,5,0),(2,100,5,0),(2,200,5,70)])
++    con.execute('insert into dings values(1,6,60,180)');con.commit();con.close()
++    result=trials.milestones({'cohort':[1,2,3],'procs':[0,2,4],'of':8,'since':100},200,db=db)
++    a,b,c=result['rows']
++    assert not a['censored'] and a['played_s']==60
++    assert b['censored'] and b['played_s']==70
++    assert c['censored'] and c['played_s'] is None
+-- 
+2.43.0
+
