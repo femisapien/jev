@@ -429,10 +429,18 @@ index 0000000..6f81a02
 +if __name__ == '__main__':
 +    main()
 diff --git a/hive/farm.py b/hive/farm.py
-index 9ee150f..84fef2f 100644
+index 9ee150f..9133f17 100644
 --- a/hive/farm.py
 +++ b/hive/farm.py
-@@ -129,7 +129,8 @@ class Farm:
+@@ -17,6 +17,7 @@ from __future__ import annotations
+ 
+ import argparse
+ import json
++import os
+ import sys
+ import threading
+ import time
+@@ -129,7 +130,8 @@ class Farm:
          # the relay, which starts one of its own when the path server is not up.
          self.query = MmapQuery(RELAY, MMAPS)
          self.facts, self.needs, self.memory = Facts(), QuestNeeds(), Memory.open()
@@ -442,7 +450,7 @@ index 9ee150f..84fef2f 100644
          self.status: dict[str, dict] = {}
          self._lock = threading.Lock()
          # Bots come and go while the farm plays (`hive.roster`): a newcomer is picked up at
-@@ -188,8 +189,8 @@ class Farm:
+@@ -188,8 +190,8 @@ class Farm:
                      code = run(guid, graph_path=self.guides[guid], run_for=self.session_s, bridge=bridge,
                                 query=self.query, needs=self.needs, facts=self.facts,
                                 learned=self.memory, stop=self.stop, senses=self.senses,
@@ -453,7 +461,7 @@ index 9ee150f..84fef2f 100644
                                 say=say)
                      raw = bridge.state(guid)
              except Exception as exc:                 # a bot's fault is its own, not the farm's
-@@ -257,6 +258,10 @@ class Farm:
+@@ -257,6 +259,10 @@ class Farm:
                      self.zone_gap_s, self.stagger_s * len(by_guide)), guid))
          return sorted(starts)
  
@@ -464,7 +472,7 @@ index 9ee150f..84fef2f 100644
      def ours(self, guid: int) -> bool:
          """Whether this farm plays `guid`: all of them, or one shard's (`--shard k/N`)."""
          return self.shard is None or config.shard_of_guid(guid, self.shard[1]) == self.shard[0]
-@@ -314,7 +319,8 @@ class Farm:
+@@ -314,7 +320,8 @@ class Farm:
          for thread in list(self.threads):
              if thread.is_alive() or thread.ident is not None:
                  thread.join()
@@ -474,7 +482,7 @@ index 9ee150f..84fef2f 100644
          self.query.close()
          return 0
  
-@@ -392,9 +398,15 @@ def main(argv: list[str]) -> int:
+@@ -392,9 +399,15 @@ def main(argv: list[str]) -> int:
      print(f"hive patches: {', '.join(patches.apply(say=lambda line: None))}", flush=True)
      # The parity switch, read once at the start (`hive.parity`): HIVE_PARITY, else the knob
      # `var/parity.json` when it names this process's shard.
@@ -585,7 +593,7 @@ index 4a0d73b..673cdd6 100644
      through: dict[int, list[int]] = defaultdict(list)
      for levels in starts.values():
 diff --git a/hive/run.py b/hive/run.py
-index 4adcd9b..11e9bc2 100644
+index 4adcd9b..f69a6bc 100644
 --- a/hive/run.py
 +++ b/hive/run.py
 @@ -12,6 +12,7 @@ teacher would cost what the hive exists to save.
@@ -596,7 +604,23 @@ index 4adcd9b..11e9bc2 100644
  import sys
  import threading
  import time
-@@ -61,7 +62,8 @@ def area_bounds() -> dict:
+@@ -23,6 +24,15 @@ from hive import config
+ from hive import parity as switch
+ from hive.jev import FOREVER
+ from hive.body import ServerBody
++
++
++def match_live_exploration(body):
++    """Older shared runtimes have no optional learned-line exploration knobs."""
++    from jev.run.body import LiveBody
++    for name in ('EXPLORE', 'UNIFORM'):
++        if hasattr(LiveBody, name):
++            setattr(body, name, getattr(LiveBody, name))
++
+ from hive.bridge import Bridge
+ from hive.client import QuestNeeds, ServerClient, with_server_travel
+ from hive.link import Link
+@@ -61,7 +71,8 @@ def area_bounds() -> dict:
  
  def paths_for(key: int) -> dict[str, Path]:
      """Where one hive character keeps what the live bot keeps under `var/playheads`."""
@@ -606,7 +630,7 @@ index 4adcd9b..11e9bc2 100644
      return {"playhead": base.with_suffix(".json"), "bar": base.with_suffix(".bar.json"),
              "equipped": base.with_suffix(".equipped.json"), "home": base.with_suffix(".home.json"),
              "purse": base.with_suffix(".purse.json"), "taxi": base.with_suffix(".taxi.json"),
-@@ -131,9 +133,11 @@ class Memory:
+@@ -131,9 +142,11 @@ class Memory:
          (`hive.shared`)."""
          from hive.shared import SharedChoices, SharedRoutes
  
@@ -621,7 +645,7 @@ index 4adcd9b..11e9bc2 100644
  
      def keep_counted(self, every_s: float, *, runs: Path = RUNS, bounds_for=None,
                       say=print):
-@@ -141,6 +145,9 @@ class Memory:
+@@ -141,6 +154,9 @@ class Memory:
          the first at once (a farm's); the sessions only read it. The counter."""
          from hive.shared import DangerCounter
  
@@ -631,7 +655,7 @@ index 4adcd9b..11e9bc2 100644
          if self.counter is None:
              runs.mkdir(parents=True, exist_ok=True)
              self.counter = DangerCounter(self.danger, runs, bounds_for or area_bounds().get,
-@@ -197,12 +204,18 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
+@@ -197,12 +213,18 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
              client.restore_trail()
          client.bar_file = files["bar"]
          client.set_bar(client.strip.bar)
@@ -650,7 +674,7 @@ index 4adcd9b..11e9bc2 100644
          say(f"{name} (guid {guid}, level {level}): {graph.graph_id}, step {memory.step_id}"
              + (f"; parity: {', '.join(sorted(client.parity))}" if client.parity else ""))
          zones = bounds_by_radio_id(str(ZONES))
-@@ -212,7 +225,7 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
+@@ -212,7 +234,7 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
              return 2
          RUNS.mkdir(parents=True, exist_ok=True)
          learned = learned or Memory.open()
@@ -659,7 +683,7 @@ index 4adcd9b..11e9bc2 100644
              from hive.shared import count_into
  
              with learned.counting:
-@@ -221,19 +234,34 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
+@@ -221,19 +243,32 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
          # The pull-risk table (`hive.pullrisk`, Jev's V461): walks priced through the places they
          # cross (V463) and plates ranked by it (V462); a Jev from before has no reader, and with
          # no file both are as before.
@@ -679,9 +703,7 @@ index 4adcd9b..11e9bc2 100644
                            home_memory=files["home"], purse_memory=files["purse"],
                            taxi_memory=files["taxi"])
 +        if os.environ.get("HIVE_LEARNING_ROOT"):
-+            from jev.run.body import LiveBody
-+            body.EXPLORE = LiveBody.EXPLORE
-+            body.UNIFORM = LiveBody.UNIFORM
++            match_live_exploration(body)
          if risks is not None and hasattr(body.fight, "risks"):
              body.fight.risks = risks
          recorder = Recorder(root=RUNS)
@@ -697,7 +719,7 @@ index 4adcd9b..11e9bc2 100644
          # What the hive measured each quest and grind to be worth (`hive.values`): Jev's judge
          # reads it (V312), and a Jev whose grind choice values quest areas reads it there (V422);
          # a Jev from before V312 has no reader.
-@@ -241,7 +269,7 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
+@@ -241,7 +276,7 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
              from jev.learn.values import Values
          except ImportError:
              Values = None
@@ -706,7 +728,7 @@ index 4adcd9b..11e9bc2 100644
          # Jev, for a character in its half of the comparison (`hive.farm`): what to arm next
          # and the learned choices are its picks, as they are the live bot's.
          judge = None
-@@ -286,7 +314,11 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
+@@ -286,7 +321,11 @@ def run(guid: int, *, graph_path: Path = GRAPH, run_for: float = 900.0, steps: i
              # A level's rib valued by what its kills paid the hive an hour net of death time
              # (`hive.ribyield`, Jev's V392); a Jev from before has no reader, and with no file
              # the rib choice is as before.
@@ -1367,6 +1389,61 @@ index 5f1b044..97c48b3 100644
 +    memory=hive_run.Memory(choices=None,danger=DangerMap(),routes=None,counting=threading.Lock())
 +    assert memory.keep_counted(60, runs=tmp_path) is None
 +    assert memory.counter is None and not memory.danger.cells
+diff --git a/tests/test_farm_startup.py b/tests/test_farm_startup.py
+new file mode 100644
+index 0000000..b4df073
+--- /dev/null
++++ b/tests/test_farm_startup.py
+@@ -0,0 +1,49 @@
++from pathlib import Path
++
++import pytest
++
++from hive import coaching, farm, patches, trials
++from hive.run import match_live_exploration
++from jev.run.body import LiveBody
++from types import SimpleNamespace
++
++
++def test_trial_setup_supports_shared_runtimes_without_optional_exploration(monkeypatch):
++    monkeypatch.delattr(LiveBody, 'EXPLORE', raising=False)
++    monkeypatch.delattr(LiveBody, 'UNIFORM', raising=False)
++    body = SimpleNamespace()
++    match_live_exploration(body)
++    assert vars(body) == {}
++    monkeypatch.setattr(LiveBody, 'EXPLORE', .1, raising=False)
++    monkeypatch.setattr(LiveBody, 'UNIFORM', 0., raising=False)
++    body.EXPLORE, body.UNIFORM = .25, .05
++    match_live_exploration(body)
++    assert (body.EXPLORE, body.UNIFORM) == (.1, 0.)
++
++
++@pytest.mark.parametrize('mode', ['rules', 'model'])
++def test_farm_entrypoint_applies_trial_policy_before_starting_workers(monkeypatch, mode):
++    monkeypatch.setattr(farm, 'held_bots', lambda: [
++        {'guid': 1, 'map': 0, 'race': 1, 'class': 8, 'level': 16, 'name': 'Fixture'}])
++    monkeypatch.setattr(farm, 'guide_for', lambda bot: Path('fixture.json'))
++    monkeypatch.setattr(patches, 'apply', lambda **kw: [])
++    monkeypatch.setattr(coaching, 'arms', lambda bots: {1: coaching.JEV})
++    coach = object()
++    monkeypatch.setattr(coaching, 'open_coach', lambda **kw: coach)
++    configured = []
++    def configure(shard):
++        configured.append(shard)
++        monkeypatch.setenv('HIVE_COACH_OVERRIDE', mode)
++    monkeypatch.setattr(trials, 'configure', configure)
++    monkeypatch.setattr(farm.switch, 'start', lambda *a, **kw: None)
++    made = []
++    class Worker:
++        def __init__(self, guides, **kwargs):
++            made.append(kwargs)
++        def play(self):
++            return 0
++    monkeypatch.setattr(farm, 'Farm', Worker)
++    assert farm.main(['--all', '--shard', '0/1']) == 0
++    assert configured == [(0, 1)]
++    assert made[0]['coach'] is (None if mode == 'rules' else coach)
++    assert made[0]['coached'] == (frozenset() if mode == 'rules' else frozenset({1}))
 diff --git a/tests/test_guard.py b/tests/test_guard.py
 index 3ae2541..f708cbc 100644
 --- a/tests/test_guard.py
