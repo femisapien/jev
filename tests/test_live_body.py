@@ -2624,3 +2624,23 @@ def test_old_purchase_failure_and_route_wedge_survive_session_handover(tmp_path,
     later._note_wedged(False)
     later._go_home.assert_called_once()
     assert later._wedged == 0
+
+
+def test_trip_service_uses_supplied_zone_after_worker_cancellation(monkeypatch):
+    from jev.coach.policy import Plan
+    from jev.guide.coords import ZoneBounds
+    b = body()
+    b.client.coordinate_zones = {123: ZoneBounds(2, 0, 200, 100, 100, 0)}
+    def cancelled():
+        raise Cancelled('playhead changed')
+    b.checkpoint = cancelled
+    shop = SimpleNamespace(entry=1, world=(50, 150, 0))
+    b._map_repairers = lambda: (shop,)
+    d = Decision(goal='repair', intent=Intent.SERVICE, skill='VENDOR_REPAIR', abort_if=['dead'],
+                 confidence=1, why='gear worn')
+    monkeypatch.setattr('jev.run.body.services', lambda *a, **kw: [Plan(d, True, 'service.repair')])
+    monkeypatch.setattr('jev.run.body.provisioner_serves', lambda *a: True)
+    state = seen()
+    state = state.model_copy(update={'pos': state.pos.model_copy(update={'zone_id':123,'mx':.5,'my':.5})})
+    options = b.trip_services(state)
+    assert len(options) == 1 and options[0][0].position == shop.world[:2]

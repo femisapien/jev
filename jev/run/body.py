@@ -1531,7 +1531,8 @@ class LiveBody:
                 continue
             shops = self._map_repairers() if skill == "VENDOR_REPAIR" else merchants(
                 self.client.bounds.map_id)
-            shops = self._in_zone(m for m in shops if provisioner_serves(m.entry, self._side))
+            shops = self._in_zone((m for m in shops if provisioner_serves(m.entry, self._side)),
+                                  state=state)
             merchant = min(shops, key=lambda m: math.dist(here, m.world[:2]), default=None)
             if merchant is None:
                 continue
@@ -3926,14 +3927,14 @@ class LiveBody:
             return ()
         return (Supply(item_id=best, name=f"bag {best}", role="bag", desired=1),)
 
-    def _in_zone(self, candidates) -> list:
+    def _in_zone(self, candidates, *, state: State | None = None) -> list:
         """The merchants standing inside the measured zone's map box, or inside the box of the
         zone the character stands in, another on the same map (V281): at Sentinel Hill on the
         Elwynn guide the mage's repair went for Frederick Stover in Stormwind, 1,900 yards and
         no complete plan (session 266), and at 14 it will stand in Elwynn on the Westfall
         guide, Goldshire's smiths out of its box."""
         boxes = [self.client.bounds]
-        here = self._zone_here()
+        here = self._zone_here() if state is None else self._zone_here(state)
         if (here is not None and here != self.client.bounds
                 and here.map_id == self.client.bounds.map_id):
             boxes.append(here)
@@ -3941,11 +3942,15 @@ class LiveBody:
             (point := world_to_map(*m.world[:2], box)) is not None
             and all(0 <= value <= 1 for value in point) for box in boxes)]
 
-    def _zone_here(self):
+    def _zone_here(self, state: State | None = None):
         """The map box of the zone the strip says the character stands in, or `None`."""
         zones = getattr(self.client, "coordinate_zones", None)
         if not zones:
             return None
+        if state is not None:
+            # Policy and shadow planning run outside the input worker. Its checkpoint
+            # may be cancelled, so use the observation the supervisor already supplied.
+            return zones.get(state.pos.zone_id)
         values = self._read() or {}
         return zones.get(values.get("pos.zone_id"))
 
