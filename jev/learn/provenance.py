@@ -5,11 +5,22 @@ import hashlib
 import json
 import platform
 import subprocess
+import sys
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_VERSION = 1
+
+
+def _git_command(root: str | Path, *, windows: bool) -> list[str]:
+    """Use the owning distro's Git for a WSL checkout, including linked worktrees."""
+    path = PureWindowsPath(root)
+    share = path.drive.split('\\')
+    if windows and len(share) == 4 and share[2].lower() in {'wsl$', 'wsl.localhost'}:
+        linux_path = '/' + '/'.join(path.parts[1:])
+        return ['wsl.exe', '--distribution', share[3], '--exec', 'git', '-C', linux_path]
+    return ['git', '-C', str(root)]
 
 
 def digest(value) -> str:
@@ -42,8 +53,10 @@ def code(root: str | Path = ROOT) -> dict:
     root = Path(root).resolve()
     try:
         def git(*args):
-            return subprocess.check_output(["git", "-C", str(root), *args],
-                                           stderr=subprocess.DEVNULL, timeout=5)
+            return subprocess.check_output(
+                [*_git_command(root, windows=sys.platform == 'win32'), *args],
+                stderr=subprocess.DEVNULL, timeout=10,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         patch = git("diff", "HEAD", "--", ".")
         extra = git("ls-files", "--others", "--exclude-standard", "--",
                     "jev/*.py", "hive/*.py", "tools/*.py", "addons/*.lua").decode().splitlines()
