@@ -85,3 +85,12 @@ cannot establish all of this by itself.
 The release gate has no exemption that converts a missing live comparison into a pass.
 An authorized candidate test runs the candidate before promotion and produces evidence;
 a final release remains a separate decision based on that evidence.
+
+For the authorized mage test, `tools/live_soak.py` holds the existing live-loop lock,
+pins the committed candidate and launch configuration, and runs bounded native Windows
+sessions for up to eight hours (six by default). It requires the expected character key
+and shadow trip mode. Wrong-character observations, unread telemetry, repeated failures,
+no XP/quest progress, excessive deaths, operator stop files, and the deadline stop the
+test. Its five focused regression tests pass. Status is written to `var/live-test/status.json`,
+with per-session logs in `captures` and full evidence in `runs`. This supervision does
+not replace the release comparisons above or establish an improvement by itself.
