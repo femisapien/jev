@@ -29,6 +29,7 @@ one JSON file (`ChoiceMemory`).
 from __future__ import annotations
 
 import json
+import math
 import random
 import threading
 import time
@@ -159,6 +160,34 @@ def _read(file: Path) -> tuple[dict[str, dict[str, Arm]], set[str]]:
             set(document.get("backfilled") or ()))
 
 
+class ScopedChoices:
+    """Context-qualified, age-weighted views; writes retain additive merge semantics.
+
+    Forgetting affects reads only, so different processes never subtract decayed counters
+    from a shared file. Old contexts remain inspectable and cannot dominate a new one.
+    """
+    def __init__(self, memory, context: str, *, half_life_s: float = 7 * 86400):
+        if not math.isfinite(half_life_s) or half_life_s <= 0:
+            raise ValueError("learning half-life must be positive")
+        self.memory, self.context, self.half_life_s = memory, context, half_life_s
+
+    def _point(self, point):
+        return f"context-v1:{self.context}:{point}"
+
+    def arms(self, point, prefix="", *, lent=True):
+        arms = self.memory.arms(self._point(point), prefix, lent=lent)
+        now = self.memory.clock()
+        for arm in arms.values():
+            weight = math.exp2(-max(0., now - arm.updated) / self.half_life_s)
+            arm.tries *= weight
+            arm.wins *= weight
+            arm.seconds *= weight
+        return arms
+
+    def record(self, point, key, won, seconds, *, save=True):
+        return self.memory.record(self._point(point), key, won, seconds, save=save)
+
+
 class ChoiceLog:
     """What each choice saw, chose and learned, one JSON line each, in a run's directory."""
 
@@ -276,6 +305,8 @@ class Stations:
         if self.log is not None:
             self.log.write({"event": "choice", "point": self.point, "objective": self.objective,
                             "rate": round(rate, 4), "by": by,
+                            "context": getattr(self.memory, "context", None),
+                            "selection_probability": None,
                             "pace": None if pooled_s is None else round(pooled_s, 2),
                             "options": [station_key(self.objective, s) for s in stations],
                             "draws": [_logged(d) for d in draws],
@@ -453,6 +484,8 @@ class Choice:
         if self.log is not None:
             self.log.write({"event": "choice", "point": self.point, "objective": objective,
                             "rate": round(rate, 4), "options": list(options), "by": by,
+                            "context": getattr(self.memory, "context", None),
+                            "selection_probability": None,
                             "pace": None if pooled_s is None else round(pooled_s, 2),
                             "draws": [_logged(d) for d in draws], "chosen": chosen})
         return chosen

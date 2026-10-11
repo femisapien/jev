@@ -87,7 +87,9 @@ def select_objective(node: Node, log: tuple[Quest, ...] | None) -> Selection:
             continue
         if target.blocked_reason:
             return Selection(complete=quest.complete, reason=target.blocked_reason)
-        if target.kind == "explore" or target.uses_item:
+        if (target.kind == "explore" or target.uses_item
+                or (target.kind == "interact" and target.interaction is not None
+                    and len(node.objective_targets) == 1)):
             # Done by the positive complete flag alone: walked into, or the quest's item used
             # on its creature (V387).
             return Selection(target=target, complete=False)

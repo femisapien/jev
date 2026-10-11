@@ -1,0 +1,4 @@
+{
+  "candidate": {"trip_mode": "active", "coach": "rules"},
+  "control": {"trip_mode": "shadow", "coach": "rules"}
+}

@@ -1,0 +1,115 @@
+{
+  "planner_microbenchmark": {
+    "input_opportunities": 1000,
+    "candidate_budget": 24,
+    "beam": 16,
+    "depth": 4,
+    "iterations": 30,
+    "median_ms": 3.7157140322960913,
+    "p95_ms": 5.641872063279152,
+    "max_ms": 12.878415989689529,
+    "scope": "synthetic CPU cost only; no movement, sensing, model call, or speed-to-level claim"
+  },
+  "route_capabilities": {
+    "routes_read": 52,
+    "top_unlocks": [
+      {
+        "capability": "quest event requires a measured interaction or route",
+        "placements": 783,
+        "quest_placements": 284,
+        "xp": 332640
+      },
+      {
+        "capability": "mixed objective families need painted counter identity",
+        "placements": 386,
+        "quest_placements": 136,
+        "xp": 136440
+      },
+      {
+        "capability": "objective kind interact has no verified executor",
+        "placements": 327,
+        "quest_placements": 109,
+        "xp": 122400
+      },
+      {
+        "capability": "destination is outside the placed route",
+        "placements": 249,
+        "quest_placements": 88,
+        "xp": 114930
+      },
+      {
+        "capability": "no supported source for quest item 3622",
+        "placements": 155,
+        "quest_placements": 55,
+        "xp": 82800
+      },
+      {
+        "capability": "objective cannot be joined to one of the three painted counters",
+        "placements": 192,
+        "quest_placements": 64,
+        "xp": 82440
+      },
+      {
+        "capability": "event and counters need painted counter identity",
+        "placements": 189,
+        "quest_placements": 65,
+        "xp": 73890
+      },
+      {
+        "capability": "no supported source for quest item 5023",
+        "placements": 90,
+        "quest_placements": 30,
+        "xp": 49950
+      },
+      {
+        "capability": "no supported source for quest item 5570",
+        "placements": 45,
+        "quest_placements": 15,
+        "xp": 27000
+      },
+      {
+        "capability": "no supported source for quest item 16764",
+        "placements": 45,
+        "quest_placements": 15,
+        "xp": 25650
+      },
+      {
+        "capability": "no creature spawn for requirement 11836",
+        "placements": 45,
+        "quest_placements": 15,
+        "xp": 21600
+      },
+      {
+        "capability": "no supported source for quest item 5100",
+        "placements": 45,
+        "quest_placements": 15,
+        "xp": 21600
+      }
+    ],
+    "scope": "hypothetical dependency unlocks; does not certify executors or install route changes"
+  },
+  "suites": {
+    "shared": {
+      "sha256": "8f0acc5a72295089dc39e91158999adcb0ef2a693a75e6114224a24f2bc2c58e",
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "3321",
+      "time": "198.041",
+      "timestamp": "2026-10-11T13:33:09.305853+01:00",
+      "hostname": "DESKTOP-BIN2HBL"
+    },
+    "hive": {
+      "sha256": "d47e4f17b85990f160d5918aea547983d8a2bd581555e5033b0c2398a9388da5",
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "59",
+      "tests": "409",
+      "time": "85.046",
+      "timestamp": "2026-10-11T13:36:59.909502+01:00",
+      "hostname": "DESKTOP-BIN2HBL"
+    }
+  }
+}

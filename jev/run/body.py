@@ -85,10 +85,8 @@ from jev.world.home import load_home, save_home
 from jev.world.quarry import NEAR_YARDS, Held
 from jev.world.quarry import held as quarry_held
 from jev.world.state_v1 import PowerType, State, StepKind
-from jev.world.taxi import FLY_MIN_YARDS, SAME_PLACE_YARDS
 from jev.world.taxi import Node as TaxiNode
-from jev.world.taxi import beyond as flight_beyond
-from jev.world.taxi import flight as flight_plan
+from jev.world.taxi import planned_flight
 from jev.world.taxi import load_nodes, save_node, starting_nodes, visited
 from jev.world.training import placements as spell_placements
 from jev.world.training import spell as spell_facts
@@ -448,6 +446,7 @@ def walk_cost(planned, world) -> float | bool:
 
 
 class LiveBody:
+    PLANNED_FLIGHTS: ClassVar[bool] = True
     # Purse saves, one at a time (V328); a body made without `__init__` shares this one.
     _purse_lock = threading.Lock()
     # Every entry has an executor. The verifier receives exactly this capability set.
@@ -845,29 +844,20 @@ class LiveBody:
         return {**seeded, **load_nodes(self.taxi_memory)}
 
     def _fly_toward(self, world) -> bool:
-        """Fly the long part of a walk, when a remembered node lands near its end and a
-        flight master stands near its start (`jev.world.taxi.flight`); and a walk of
-        `FLY_MIN_YARDS` or more no route on foot finishes, from the flight master the planner
-        walks to soonest to the node it walks on from (`jev.world.taxi.beyond`, V408): from
-        Teldrassil every walk to Darkshore ends in the sea. Anything short of landing leaves
-        the character to walk from wherever it is."""
+        """Use a known flight when its planned ground legs and estimated ride beat walking,
+        or bridge an unreachable walk. The taxi map and actual landing confirm execution."""
         here = self._position()
         if here is None:
             return False
         at = map_to_world(*here, self.client.bounds)
         nodes = self._taxi_nodes()
         masters = flightmasters(self.client.bounds.map_id, self._side)
-        plan = flight_plan(at, world[:2], nodes, masters)
-        walk = None
+        plan = self._flight_plan(at, world, nodes, masters)
         if plan is None:
-            found = self._flight_beyond(at, world, nodes, masters)
-            if found is None:
-                return False
-            master, node, walk = found
-            self.say(f"  no walk finishes at ({world[0]:.0f}, {world[1]:.0f}): flying from "
-                     f"{master.name} to {node.flightmaster} on the way")
-        else:
-            master, node = plan
+            return False
+        master, node, walk = plan
+        self.say(f"  planned flight from {master.name} to {node.flightmaster} "
+                 f"on the way ({walk:.0f} yards to the flight master)")
         self._flying = True
         kept = self.travel_timeout
         if walk is not None:
@@ -893,20 +883,9 @@ class LiveBody:
             self._flying = False
             self.travel_timeout = kept
 
-    def _flight_beyond(self, at, world, nodes, masters):
-        """`jev.world.taxi.beyond` for a walk to `world` of `FLY_MIN_YARDS` or more that the
-        planner finds no way for (V408): its flight master, its node and the walk there in
-        yards, or `None`. A flight that came to nothing lately is not tried again."""
-        if (len(world) < 3 or math.dist(at[:2], world[:2]) < FLY_MIN_YARDS or not nodes
-                or self._side is None):
-            return None                          # nor before the side is read: its masters
-        # A landing on this map nearer the end than the character, before any plan is asked.
-        ahead = math.dist(at[:2], world[:2])
-        if not any(math.dist(n.world[:2], world[:2]) < ahead
-                   and any(math.dist(m.world[:2], n.world[:2]) <= SAME_PLACE_YARDS for m in masters)
-                   for n in nodes.values()):
-            return None
-        if self._planned_walk(None, world) is not None:
+    def _flight_plan(self, at, world, nodes, masters):
+        """The shared planner, with a cooldown for every failed origin/destination pair."""
+        if self._side is None:
             return None
         failed = getattr(self, "_flights_failed", None) or {}
         now = time.monotonic()
@@ -915,12 +894,10 @@ class LiveBody:
             when = failed.get((master.name, node.name_id))
             return when is not None and now - when < FLIGHT_FAILED_S
 
-        return flight_beyond(at, world, masters, nodes, self._planned_walk, skip=skip)
+        return planned_flight(at, world, masters, nodes, self._planned_walk, skip=skip)
 
     def _flight_failed(self, master, node, walk) -> None:
-        """A flight where no walk finishes that came to nothing (V408), kept `FLIGHT_FAILED_S`."""
-        if walk is None:
-            return
+        """Any flight that came to nothing, kept `FLIGHT_FAILED_S`."""
         failed = getattr(self, "_flights_failed", None)
         if failed is None:
             failed = self._flights_failed = {}
@@ -1165,6 +1142,8 @@ class LiveBody:
                 with self.client._capturing:
                     return _counted(target_progress(self.client.log.complete, node.quest_id,
                                                     destination))
+        if isinstance(destination, ObjectiveTarget) and destination.kind == "interact":
+            return self._dialogue_objective(destination, complete_reader)
         if isinstance(destination, ObjectiveTarget) and destination.kind == "explore":
             return self._explore(destination, complete_reader)
         # The quest's item used on its creature: a hunt whose pulls are uses (V387).
@@ -1490,7 +1469,9 @@ class LiveBody:
         self.choice_memory, self.choice_log = memory, log
         # Jev sets a fight's heal line as it begins; the line for a pack, picked in the fight,
         # is not a choice to wait on. A line's try is a fight's cycle (V311).
-        self.fight.choices = Choice(memory, HEAL_POINT, log=log, rng=self.choice_rng,
+        from jev.learn.choices import ScopedChoices
+        self.fight.choices = Choice(ScopedChoices(memory, self._learning_context()), HEAL_POINT,
+                                    log=log, rng=self.choice_rng,
                                     judge=self.judge, judged=frozenset({"all"}),
                                     unit="a cycle")
 
@@ -1507,13 +1488,91 @@ class LiveBody:
             return None
         return tuple(map_to_world(state.pos.mx, state.pos.my, self.client.bounds)[:2])
 
+    def trip_position(self, state: State):
+        if self.client.bounds is None or state.pos.mx is None or state.pos.my is None:
+            return None
+        return tuple(map_to_world(state.pos.mx, state.pos.my, self.client.bounds)[:2])
+
+    def trip_services(self, state: State):
+        """Executable service opportunities with the same merchant eligibility as the body.
+
+        Service costs are conservative estimates. Purchases and repairs still verify actual
+        stock, price and outcome on arrival; the plan cannot grant itself inventory or gold.
+        """
+        from jev.coach.trips import Opportunity
+        from jev.world.journey import Cost
+
+        here = self.trip_position(state)
+        if here is None:
+            return []
+        plans = list(services(state, context=self.policy_context))
+        revision, room = getattr(self, "_trip_bag_offer", (None, 0))
+        room = room if revision is not None and revision == state.bags.inventory_revision else 0
+        # A useful hub visit may make room before a loot objective fills the final slot.
+        if (room > 0 and state.bags.free is not None and state.bags.free <= 4
+                and self.policy_context.can_make_space(state.bags.free, state.guide.step_id,
+                                                       state.t)):
+            from jev.coach.policy import Plan
+            from jev.coach.schema import Decision, Intent
+            plans.append(Plan(Decision(goal="trip:bags", intent=Intent.SERVICE,
+                                      skill="BAG_MAKE_SPACE", abort_if=["dead", "combat"],
+                                      confidence=.8, why="make room during a useful hub visit"),
+                              True, "service.trip_bags"))
+        out = []
+        for plan in plans:
+            skill = plan.decision.skill
+            if skill not in ("BAG_MAKE_SPACE", "VENDOR_REPAIR"):
+                continue
+            shops = self._map_repairers() if skill == "VENDOR_REPAIR" else merchants(
+                self.client.bounds.map_id)
+            shops = self._in_zone(m for m in shops if provisioner_serves(m.entry, self._side))
+            merchant = min(shops, key=lambda m: math.dist(here, m.world[:2]), default=None)
+            if merchant is None:
+                continue
+            out.append((Opportunity("service:" + skill, merchant.world[:2], 0,
+                                    Cost(interaction=30), slots=-room if skill == "BAG_MAKE_SPACE" else 0,
+                                    kind="service"), plan))
+        return out
+
+    def _dialogue_objective(self, target: ObjectiveTarget, complete) -> Result:
+        if (target.interaction is None or target.target_kind != "creature"
+                or not target.target_name or target.world is None
+                or target.map_id != self.client.bounds.map_id):
+            return Result(SkillOutcome.ABORTED, "dialogue has no verified contract", "unsupported")
+        opened = self._open_on(target.target_name, target.world, target.pos)
+        if not opened.opened:
+            return self._result(opened, self.interact.detail)
+        for line in target.interaction.gossip_lines:
+            self.checkpoint()
+            if complete() is True:
+                return Result(SkillOutcome.SUCCEEDED, "quest completion observed", "done")
+            chose = self.chooser.run(line)
+            if not chose.ok:
+                return self._result(chose, self.chooser.detail)
+        # An accepted click is never completion. A later assembled log can finish the step.
+        if complete() is True:
+            return Result(SkillOutcome.SUCCEEDED, "quest completion observed", "done")
+        return Result(SkillOutcome.ABORTED, "dialogue sent; completion unconfirmed", "unconfirmed")
+
     def _stations(self, point: str, objective: str):
         """A chooser of stations for `point`, learning under `objective`; `None` without a
         memory (`jev.learn.choices.Stations`)."""
         if self.choice_memory is None:
             return None
-        return Stations(self.choice_memory, point, objective, log=self.choice_log,
+        from jev.learn.choices import ScopedChoices
+        return Stations(ScopedChoices(self.choice_memory, self._learning_context()),
+                        point, objective, log=self.choice_log,
                         rng=self.choice_rng, judge=self.judge)
+
+    def _learning_context(self) -> str:
+        from jev.learn.provenance import artifact, digest
+        recent = getattr(self.client, "recent_state", None)
+        state = recent(RECENT_READ_S) if callable(recent) else None
+        gear = getattr(self, "gear_memory", None)
+        return digest({"class": state.char.cls if state else None,
+                       "race": state.char.race if state else None,
+                       "level_band": (state.char.level or 1) // 3 if state else None,
+                       "gear": artifact(gear).get("sha256") if gear else None})[:20]
 
     def _service_needed(self, skip: tuple[str, ...] = ()) -> str | None:
         """Why a service is due now, the first of them, any rule of `skip` aside (a taming's
@@ -3549,6 +3608,9 @@ class LiveBody:
                                            "eligible": sorted(eligible)})
                 counted = getattr(equipper, "last_census", None) or {}
                 worth = sum(eligible.get(item, 0) * count for item, count in counted.values())
+                self._trip_bag_offer = (values.get("inventory.revision"),
+                                       sum(1 for item, count in counted.values()
+                                           if count and eligible.get(item, 0) > 0))
                 free = values.get("bags.free")
                 # The food bought after the sale has the slots the sale empties (V550).
                 if isinstance(free, int):

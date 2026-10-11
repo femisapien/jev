@@ -26,12 +26,20 @@ from collections import Counter
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, model_serializer
 
 from jev.world.combat import grey_level, kill_xp
 from jev.world.state_v1 import StepKind
 
 GRAPH_SCHEMA = 3
+
+
+class InteractionSpec(BaseModel):
+    """Curated dialogue, tied to a captured client recording; no generated inputs."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    gossip_lines: tuple[str, ...] = Field(min_length=1, max_length=3)
+    evidence_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    client_build: Literal["tbc-2.4.3-8606"]
 
 
 class ObjectiveTarget(BaseModel):
@@ -58,6 +66,16 @@ class ObjectiveTarget(BaseModel):
     coord_zone_id: int | None = None
     hunt_yards: float | None = None
     blocked_reason: str | None = None
+    interaction: InteractionSpec | None = None
+    counter_evidence_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_serializer(mode="wrap")
+    def _optional_contracts(self, handler):
+        out = handler(self)
+        for key in ("interaction", "counter_evidence_sha256"):
+            if out.get(key) is None:
+                out.pop(key, None)
+        return out
 
     @property
     def uses_item(self) -> bool:

@@ -252,6 +252,20 @@ class Recorder:
             encoding="utf-8",
         )
 
+    def environment(self, evidence: dict) -> None:
+        """Seal a run's input contract once, before the first gameplay tick."""
+        from jev.persist import atomic_json
+
+        with self._writing:
+            path = self.dir / "manifest.json"
+            data = json.loads(path.read_text())
+            if self._tick_id and "environment" not in data:
+                raise ValueError("environment must be sealed before the first tick")
+            if "environment" in data and data["environment"] != evidence:
+                raise ValueError("a run's environment cannot change after it is recorded")
+            data["environment"] = evidence
+            atomic_json(path, data)
+
     def _handle(self, stream: Stream):
         if stream not in self._files:
             self._files[stream] = (self.dir / f"{stream.value}.jsonl").open(

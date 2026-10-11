@@ -263,6 +263,11 @@ class ClientRuntime:
     # Jev, the coach's model (`jev.coach.judge.Judge`): with one, what to arm next among the
     # scripted coach's own plans is its pick wherever there is more than one (PLAN §9).
     judge: object | None = None
+    trip_mode: str = "off"
+    trip_position: object | None = None
+    trip_services: object | None = None
+    trip_travel: object | None = None
+    trip_map_id: int | None = None
 
     available_skills: frozenset[str] = NAMES
     keys_down: Callable[[], list[str]] | None = None
@@ -374,6 +379,9 @@ class ClientRuntime:
     stale_after_s: float = 60.0
 
     def __post_init__(self) -> None:
+        from jev.coach.trip_runtime import TripController
+        self._trips = TripController(self.trip_mode)
+        self._trip_override = None
         self.tracker = Tracker(self.graph, self.graph.entry)
         self._nodes = self.graph.by_id()
         # A rib the route leaves out is no grind (V331): in a capital's box, or of a creature
@@ -546,6 +554,10 @@ class ClientRuntime:
             self._progress()
 
         if choose:
+            if self.armed is None and self.trip_mode != "off":
+                self._trip_override = self._trips.choose(self, state, node)
+                node = self.graph.get(self.tracker.step_id)
+                state = with_key(self._with_guide(state, TrackVerdict(Event.NONE)))
             plan, by, rule, decision_id = self._choose(state, node)
             if not self._same_arm(plan, by, state.guide.step_id):
                 self._close_armed(state, plan, by)
@@ -587,6 +599,7 @@ class ClientRuntime:
     def finish(self, outcome: SkillOutcome, detail: str = "", *, state: State | None = None) -> None:
         """The body reports its measured outcome once, against the original arm."""
         if self.armed is not None and self.last_state is not None:
+            self._trips.finish(self, state or self.last_state, self.armed, outcome)
             self._skill_result(state or self.last_state, outcome, detail)
             # Only the step's own work is an attempt at it. A fight that lost its target on
             # the way made a quest accept's first timeout its second attempt, and "not
@@ -1653,6 +1666,10 @@ class ClientRuntime:
 
     def _choose(self, state: State, node) -> tuple[Decision, ArmedBy, str, str]:
         floor = self._leveled(scripted.decide(state, node, context=self.policy_context), node)
+        if self._trip_override is not None:
+            if floor.rule.startswith(("guide.", "grind.", "fallback.")):
+                floor = self._trip_override
+            self._trip_override = None
         if not state.sense.addon_ok and (state.sense.vision_conf or 0.0) < 0.5:
             floor = scripted.Plan(Decision(goal="wait:blind", intent=Intent.WAIT, skill=None,
                                            abort_if=["senses_restored"], confidence=0,

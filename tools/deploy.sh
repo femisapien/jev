@@ -25,6 +25,16 @@ if ! grep -q "^exit=0$" "$SUITE"; then
   grep -E "FAILED|ERROR" "$SUITE" | head
   exit 1
 fi
+candidate=$(git rev-parse "$BRANCH^{commit}") || exit 1
+if git cat-file -e "$candidate:tools/release_gate.py" 2>/dev/null; then
+  gate_file=$(mktemp) || exit 1
+  git show "$candidate:tools/release_gate.py" > "$gate_file" || exit 1
+  "${JEV_PYTHON:-.venv/bin/python}" "$gate_file" --commit "$candidate" \
+    --record "var/releases/$candidate.json"
+  gate_rc=$?
+  rm -f "$gate_file"
+  [ "$gate_rc" = 0 ] || { say "release qualification is incomplete; nothing merged"; exit 1; }
+fi
 say "the suite passed; waiting for the session to end"
 while pgrep -f "tools/[s]tart_teaching.py --run" > /dev/null; do sleep "$POLL_S"; done
 [ -e "$HOLD" ] || { say "the hold was taken away; not merging"; exit 1; }

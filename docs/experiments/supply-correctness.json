@@ -1,0 +1,6 @@
+{
+  "file": "executions.jsonl",
+  "match": {"operation": "provisions.gave_up", "code": "no_supplier"},
+  "decide": "target",
+  "kind": "correctness"
+}

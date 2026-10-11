@@ -81,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="stop cooperatively when this file exists; the file is never deleted")
     parser.add_argument("--steps", type=int, default=0, help="debug cap on completed guide steps")
     parser.add_argument("--run-for", type=float, default=3600)
+    parser.add_argument("--trip-mode", choices=("off", "shadow", "active"), default="shadow",
+                        help="record trip proposals; active is an explicit challenger trial")
     parser.add_argument("--retries", type=int, default=RETRIES)
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--hunt", type=float, default=600)
@@ -591,6 +593,17 @@ def _live(args, graph) -> int:
         stamp("body built")
         if recorder is None:
             recorder = Recorder(root=args.runs_dir)
+        from jev.learn.provenance import manifest
+        recorder.environment(manifest(
+            tier="live-client", graph=graph,
+            artifacts=(args.graph, ROOT / "data" / "zones-tbc-243.json",
+                       ROOT / "addons" / "JevRadio" / "Fields.lua",
+                       ROOT / "data" / "knowledge" / "tbc-243.sqlite",
+                       ROOT / "var" / "choices.json", ROOT / "var" / "danger.json",
+                       ROOT / "var" / "route-memory.json", path),
+            client_id=args.client_id, timing_seed="sha256-client-v1",
+            observation="screen-and-painted-radio", play_mode=args.play_mode,
+            trip_mode=args.trip_mode))
         # What each choice has paid off before (`jev.learn.choices`), counted first from any
         # runs that predate the choices' own log; this run logs its own.
         choices = ChoiceMemory(ROOT / "var" / "choices.json", prior=PRIOR / "choices.json")
@@ -674,6 +687,8 @@ def _live(args, graph) -> int:
             available_skills=body.available,
             validate_action=body.validate,
             judge=judge,
+            trip_mode=args.trip_mode, trip_position=getattr(body, "trip_position", None),
+            trip_services=getattr(body, "trip_services", None), trip_map_id=getattr(getattr(client, "bounds", None), "map_id", None),
             # The hive's measured grinds value the ribs (V560), with or without the coach.
             values=_rib_values(),
         )

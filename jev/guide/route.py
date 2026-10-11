@@ -48,6 +48,16 @@ def _gap(node: Node, available_skills: frozenset[str],
     for target in node.objective_targets:
         if target.blocked_reason:
             return target.blocked_reason
+        if target.kind == "interact" and target.interaction is not None:
+            if (target.target_kind != "creature" or not target.target_name
+                    or target.world is None or target.pos is None or target.map_id != node.map_id):
+                return "dialogue needs a placed creature identity"
+            if len(node.objective_targets) > 1 and (
+                    target.counter_index is None or target.counter_index >= 3
+                    or target.required_count is None or target.required_count > 126
+                    or target.counter_evidence_sha256 is None):
+                return "mixed dialogue needs a recorded counter identity"
+            continue
         if target.kind not in supported_objectives or (target.kind == "event"
                                                         and not target.uses_item):
             return f"objective kind {target.kind} has no verified executor"

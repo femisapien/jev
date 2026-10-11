@@ -251,7 +251,7 @@ def test_a_gather_tries_first_where_the_object_has_been_found_and_learns_the_vis
     import random
 
     from jev.clients.gather import Gathered
-    from jev.learn.choices import ChoiceMemory, station_key
+    from jev.learn.choices import ChoiceMemory, ScopedChoices, station_key
 
     quest = Quest(quest_id=1, complete=False, objectives=(
         Objective(text="crates", have=7, need=8, counter_index=0),))
@@ -265,9 +265,10 @@ def test_a_gather_tries_first_where_the_object_has_been_found_and_learns_the_vis
     b.hunt_spawns = {f"{node.id}#161557": (far, near)}
     b.client.position = lambda: (0.5, 0.5)
     b.choice_memory = ChoiceMemory()
+    scoped = ScopedChoices(b.choice_memory, b._learning_context())
     for _ in range(6):
-        b.choice_memory.record("gather.station", station_key("object:161557", far), True, 5.0)
-        b.choice_memory.record("gather.station", station_key("object:161557", near), False, 5.0)
+        scoped.record("gather.station", station_key("object:161557", far), True, 5.0)
+        scoped.record("gather.station", station_key("object:161557", near), False, 5.0)
     b.choice_rng = random.Random(5)
     walked = []
     b.client.approach.side_effect = lambda world, **kw: walked.append(world) or True
@@ -283,5 +284,5 @@ def test_a_gather_tries_first_where_the_object_has_been_found_and_learns_the_vis
     result = b._hunt(seen(quests=b.client.log.complete))
     assert result.outcome is SkillOutcome.SUCCEEDED
     assert walked == [far], "the point that has given crates before, though it is further"
-    arm = b.choice_memory.arms("gather.station")[station_key("object:161557", far)]
-    assert (arm.tries, arm.wins) == (7, 7)
+    arm = scoped.arms("gather.station")[station_key("object:161557", far)]
+    assert (arm.tries, arm.wins) == __import__("pytest").approx((7, 7))
