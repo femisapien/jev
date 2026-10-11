@@ -525,6 +525,8 @@ class LiveBody:
         self._bar_items: dict[int, int] = {}
         self._bar_failed: dict[int, tuple[int, float]] = {}
         self._provisions_far: set[int] = set()
+        self._wedged = 0
+        self._wand_retry_at = self._weapon_retry_at = 0.0
         self.travelling = False
         self.policy_context = Context()
         self.checkpoint: Callable[[], None] = lambda: None
@@ -576,7 +578,6 @@ class LiveBody:
         self._hearth_ready_at: float | None = None      # wall time, in the purse file (V253)
         self._talents_failed: int | None = None           # the level a visit failed at (V261)
         self._reclaim_yards = TRAP_RECLAIM_YARDS    # how far short of the body a ghost gets up
-        self._wedged = 0
         self._walks_between: dict[tuple, tuple[float, float | bool]] = {}   # V383
         self._walks: dict[int, float] = {}          # the last ranking's planned walks (V309)
         # What the last Call Pet said of a pet not out (V389): none kept, or kept dead.
@@ -994,13 +995,18 @@ class LiveBody:
         outcome = getattr(getattr(last, "outcome", None), "value", None)
         wedged = (not arrived and last is not None
                   and ("could not free the character" in (getattr(last, "detail", "") or "")
+                       or "route remained within" in (getattr(last, "detail", "") or "")
                        or (outcome not in ("aborted", "refused", "lost")
                            and isinstance(headway, float) and headway < NO_HEADWAY_YARDS
                            and isinstance(distance, float)
                            and distance >= 2 * NO_HEADWAY_YARDS)))
-        self._wedged = self._wedged + 1 if wedged else 0
+        count = self._wedged + 1 if wedged else 0
+        if count != self._wedged:
+            self._wedged = count
+            self._save_purse()
         if self._wedged >= WEDGED_WALKS:
             self._wedged = 0
+            self._save_purse()
             home = self._go_home()
             self.say(f"  wedged {WEDGED_WALKS} walks running: hearthstone {home.value} "
                      f"{self.hearth.detail}".rstrip())
@@ -2232,6 +2238,19 @@ class LiveBody:
                 ready = raw.get("hearth_ready_at") if isinstance(raw, dict) else None
                 if isinstance(ready, (int, float)) and not isinstance(ready, bool):
                     self._hearth_ready_at = float(ready)
+                for name, skill in (("wand_retry_at", "BUY_WAND"),
+                                    ("weapon_retry_at", "BUY_WEAPON")):
+                    # Older sessions saved the failed service but lost the body's hour-long
+                    # purchase delay. Honour that evidence on the first upgraded session too.
+                    retry = (raw.get(name, context.service_failed_at.get(skill, 0) + WAND_RETRY_S)
+                             if isinstance(raw, dict) else None)
+                    if (isinstance(retry, (int, float)) and not isinstance(retry, bool)
+                            and math.isfinite(retry)
+                            and 0 <= retry - time.time() <= WAND_RETRY_S):
+                        setattr(self, "_" + name, float(retry))
+                wedged = raw.get("wedged_walks") if isinstance(raw, dict) else None
+                if type(wedged) is int and 0 <= wedged < WEDGED_WALKS:
+                    self._wedged = wedged
                 # A body the last session could not get up at is the same body now, and its
                 # Spirit Healer where the ghost appeared (V301): a session in the hive lasted
                 # about five corpse runs, and one that begins as a ghost never saw the graveyard.
@@ -2337,6 +2356,9 @@ class LiveBody:
                                                   "conjured": sorted(self._conjured_last),
                                                   "revived_at": self._revived_at,
                                                   "hearth_ready_at": self._hearth_ready_at,
+                                                  "wand_retry_at": getattr(self, "_wand_retry_at", 0.0),
+                                                  "weapon_retry_at": getattr(self, "_weapon_retry_at", 0.0),
+                                                  "wedged_walks": getattr(self, "_wedged", 0),
                                                   "unreached_body": unreached,
                                                   "graveyard": (list(self._graveyard)
                                                                 if self._graveyard else None),
@@ -2681,6 +2703,7 @@ class LiveBody:
             return Result(SkillOutcome.ABORTED, "no wand worth buying in reach", "nothing")
         merchant, item, price = offer
         self._wand_retry_at = time.time() + WAND_RETRY_S     # cleared by a purchase
+        self._save_purse()
         point = world_to_map(*merchant.world[:2], self.client.bounds)
 
         def visit():
@@ -2701,6 +2724,7 @@ class LiveBody:
         put_on = ""
         if vendor.bought_units:
             self._wand_retry_at = 0.0
+            self._save_purse()
             note_merchant(self.merchant_memory, merchant.entry, failed=False)
             self._gear_checked = object()          # looked through again, the wand put on
             self._wear_upgrades()
@@ -2758,6 +2782,7 @@ class LiveBody:
             return Result(SkillOutcome.ABORTED, "no weapon worth buying in reach", "nothing")
         merchant, item, price = offer
         self._weapon_retry_at = time.time() + WAND_RETRY_S     # cleared by a purchase
+        self._save_purse()
         point = world_to_map(*merchant.world[:2], self.client.bounds)
 
         def visit():
@@ -2778,6 +2803,7 @@ class LiveBody:
         put_on = ""
         if vendor.bought_units:
             self._weapon_retry_at = 0.0
+            self._save_purse()
             note_merchant(self.merchant_memory, merchant.entry, failed=False)
             self._gear_checked = object()          # looked through again, the weapon put on
             self._wear_upgrades()

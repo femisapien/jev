@@ -2562,3 +2562,65 @@ def test_a_unit_no_nameplate_shows_at_its_spawn_is_found_by_a_hover_sweep_there(
     b._hover_interact = lambda name: hovered.append(name) and False
     assert b._open_unit("Marshal McBride", (1.0, 2.0, 3.0), (0.5, 0.5)) is Interacted.NO_TARGET
     assert len(hovered) == 4
+
+
+@pytest.mark.parametrize(('kind', 'skill'), [('wand', 'BUY_WAND'), ('weapon', 'BUY_WEAPON')])
+def test_failed_optional_purchase_waits_across_native_sessions(tmp_path, monkeypatch, kind, skill):
+    from jev.coach.policy import Context
+    from jev.run.body import WAND_RETRY_S
+    now = [10000.0]
+    monkeypatch.setattr('jev.run.body.time.time', lambda: now[0])
+    merchant = SimpleNamespace(name='Unreachable merchant', entry=123, world=(50, 50, 0))
+    offer = (merchant, 5208, 3340)
+    monkeypatch.setattr(f'jev.run.body.{kind}_for_sale', lambda **kw: offer)
+    b = body()
+    b.purse_memory = tmp_path / 'purse.json'
+    b.policy_context = Context()
+    if kind == 'weapon':
+        b._shoots = lambda *a: True
+    setattr(b, f'_{kind}_offer', lambda state: offer)
+    failure = BodyFailure(Result(SkillOutcome.ABORTED, 'wall', 'approach_failed'))
+    class MerchantDesk:
+        def __init__(self, *args, **kwargs): pass
+        def run(self, **kwargs): raise failure
+    monkeypatch.setattr('jev.run.body.Vendor', MerchantDesk)
+    with pytest.raises(BodyFailure):
+        getattr(b, f'_buy_{kind}')(seen())
+    now[0] += 900
+    later = body()
+    later.purse_memory = b.purse_memory
+    later.policy_context = Context()
+    if kind == 'weapon':
+        later._shoots = lambda *a: True
+    state = seen()
+    state = state.model_copy(update={'bags': state.bags.model_copy(update={'money_copper':12000}),
+                                    'pos': state.pos.model_copy(update={'mx':.5, 'my':.5})})
+    assert getattr(later, f'_{kind}_offer')(state) is None
+    now[0] += WAND_RETRY_S
+    assert getattr(later, f'_{kind}_offer')(state) == offer
+
+
+def test_old_purchase_failure_and_route_wedge_survive_session_handover(tmp_path, monkeypatch):
+    import json
+    from jev.coach.policy import Context
+    from jev.clients.travel import ROUTE_WEDGED, Outcome
+    from jev.clients.hearth import Hearthed
+    monkeypatch.setattr('jev.run.body.time.time', lambda: 10000.0)
+    b = body()
+    b.purse_memory = tmp_path / 'purse.json'
+    b.purse_memory.write_text(json.dumps({'service_failed_at': {'BUY_WAND': 9700},
+                                        'service_failures': {'BUY_WAND': 1}}))
+    b.policy_context = Context()
+    assert b._wand_retry_at == 13300.0
+    b.client.last_travel = SimpleNamespace(outcome=Outcome.STUCK, detail=ROUTE_WEDGED)
+    b._go_home = Mock(return_value=Hearthed.HOME)
+    b._note_wedged(False)
+    b._go_home.assert_not_called()
+    later = body()
+    later.purse_memory = b.purse_memory
+    later.policy_context = Context()
+    later.client.last_travel = b.client.last_travel
+    later._go_home = Mock(return_value=Hearthed.HOME)
+    later._note_wedged(False)
+    later._go_home.assert_called_once()
+    assert later._wedged == 0

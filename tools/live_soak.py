@@ -248,10 +248,11 @@ class Monitor:
         def summary(s):
             if not s: return None
             return {'char':s.get('char'),'vitals':s.get('vitals'), 'bags':s.get('bags'),
-                    'guide':s.get('guide')}
+                    'guide':s.get('guide'), 'pos':s.get('pos'), 'flags':s.get('flags')}
         return {'first':summary(self.first), 'latest':summary(self.latest),
                 'deaths_last_hour':len(self.deaths),
                 'deaths_total':self.total_deaths,
+                'last_progress_at':self.last_progress,
                 'operations':{'|'.join(str(v) for v in k):n for k,n in self.operations.items()}}
 
 

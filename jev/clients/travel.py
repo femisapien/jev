@@ -98,6 +98,23 @@ LOOKAHEAD_YARDS = 4.0
 # (session 241).
 CORNER_YARDS = 1.0
 
+# A route may re-plan and change waypoints without escaping the same small pocket.
+# Keep this budget across every leg, detour and recursive re-plan of one walk.
+ROUTE_HEADWAY_S = 90.0
+ROUTE_HEADWAY_YARDS = 40.0
+ROUTE_WEDGED = "route remained within 40 yards for 90 seconds"
+
+
+@dataclass
+class RouteProgress:
+    anchor: tuple[float, float] | None = None
+    since: float = 0.0
+
+    def wedged(self, here, now, distance) -> bool:
+        if self.anchor is None or distance(self.anchor, here) > ROUTE_HEADWAY_YARDS:
+            self.anchor, self.since = here, now
+        return now - self.since >= ROUTE_HEADWAY_S
+
 
 class Outcome(StrEnum):
     ARRIVED = "arrived"
@@ -368,6 +385,15 @@ class Travel:
                     self.closest_yards = remaining
                 if remaining <= self.arrival_yards:
                     return self._result(Outcome.ARRIVED, start, here, target, elapsed, "")
+                progress = getattr(self, "_route_progress", None)
+                if progress is not None and progress.wedged(here, now, self.distance):
+                    if getattr(self.hid, "refused", 0) > refused_at_start:
+                        return self._result(Outcome.REFUSED, start, here, target, elapsed,
+                                            "the game window lost focus; nothing was pressed")
+                    self.stuck_events += 1
+                    self.last_stuck_at = here
+                    return self._result(Outcome.STUCK, start, here, target, elapsed,
+                                        ROUTE_WEDGED)
                 if (destination is not None and destination_yards is not None
                         and not early_refused
                         and self.distance(here, destination) <= destination_yards):
@@ -466,6 +492,19 @@ class Travel:
                max_replans: int = 3, memory=None, rounds: int = 2,
                reach: Callable[[tuple[float, float]], float | None] | None = None,
                ) -> TravelResult:
+        """Follow a route with one headway budget shared by all of its re-plans."""
+        previous = getattr(self, "_route_progress", None)
+        if previous is None:
+            self._route_progress = RouteProgress()
+        try:
+            return self._follow(path, timeout_s=timeout_s, abort=abort, replan=replan,
+                                max_replans=max_replans, memory=memory, rounds=rounds,
+                                reach=reach)
+        finally:
+            self._route_progress = previous
+
+    def _follow(self, path, *, timeout_s, abort, replan, max_replans, memory, rounds,
+                reach) -> TravelResult:
         """Walk a planned route, one waypoint at a time.
 
         Sequencing only. The follower is unchanged and learns nothing new about geometry:
@@ -536,6 +575,11 @@ class Travel:
                 return self._result(Outcome.ARRIVED, legs[0], self.position(), legs[-1],
                                     time.perf_counter() - t0, "")
 
+            if last.outcome is Outcome.STUCK and ROUTE_WEDGED in last.detail:
+                self.arrival_yards = exact
+                return self._result(Outcome.STUCK, legs[0], last.end, legs[-1],
+                                    time.perf_counter() - t0, last.detail)
+
             if last.outcome is Outcome.STUCK:
                 stuck_at = self.last_stuck_at
                 # Blocked. Ask the planner from here instead of improvising: the mesh
@@ -582,7 +626,8 @@ class Travel:
                     # detour can find, like the pocket under Echo Ridge Mine's pit prop.
                     # Remember it as blocked and ask the planner once more, for a route
                     # that stays clear of it (`AvoidingQuery`).
-                    if (last.outcome is Outcome.STUCK and memory is not None
+                    if (last.outcome is Outcome.STUCK and ROUTE_WEDGED not in last.detail
+                            and memory is not None
                             and replan is not None and rounds > 0 and stuck_at is not None):
                         rounded = self._round_blocked(
                             path, legs[i - 1], leg, stuck_at, memory, replan,

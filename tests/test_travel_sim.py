@@ -54,6 +54,42 @@ FENCE = [Segment(-30, -20, 30, -20)]                         # 60 yards across t
 WEDGE = [Segment(-20, 0, 20, 0), Circle(0, 1.4, 0.7)]       # a trunk a body-width off a wall
 
 
+def test_replanning_inside_a_closed_pocket_keeps_one_headway_budget(monkeypatch):
+    """Stormwind's canal: moving and changing legs did not mean leaving the pocket."""
+    from jev.clients.travel import ROUTE_WEDGED
+
+    walls = [Segment(-8, -8, 8, -8), Segment(8, -8, 8, 8),
+             Segment(8, 8, -8, 8), Segment(-8, 8, -8, -8)]
+    world = WalkWorld(x=X0, y=Y0, heading=0,
+                      obstacles=tuple(_shifted(o) for o in walls),
+                      width_yards=W, height_yards=H)
+    monkeypatch.setattr(travel_module, "time", SimTime(world))
+    t = Travel(hid=SimHid(world), bounds=ELWYNN, read_pos=world.map_position)
+    plans = []
+
+    def replan(here):
+        # A changed answer must not grant another 90 seconds in the same pocket.
+        sign = -1 if len(plans) % 2 else 1
+        route = Path(PathStatus.COMPLETE,
+                     (world.world(world.x, world.y, ELWYNN, 80),
+                      world.world(X0 + 100 * sign, Y0 + 40, ELWYNN, 80)))
+        plans.append(route)
+        return route
+
+    result = t.follow(replan(world.map_position()), replan=replan,
+                      max_replans=100, timeout_s=600)
+    assert result.outcome is Outcome.STUCK and ROUTE_WEDGED in result.detail
+    assert 90 <= result.elapsed_s < 115
+    assert len(plans) > 2, "the budget must span more than one re-plan"
+    assert not world.keys, "the failed walk must release movement"
+    assert t._route_progress is None, "a later independent walk gets its own budget"
+
+
+def test_a_long_open_walk_is_not_limited_to_ninety_seconds(monkeypatch):
+    result, _ = walk([(0, 0), (750, 0)], [], 0, monkeypatch=monkeypatch)
+    assert result.outcome is Outcome.ARRIVED and result.elapsed_s > 90
+
+
 @pytest.mark.parametrize(("name", "points", "obstacles", "heading"), [
     ("long fence", [(0, 0), (0, -40)], FENCE, -math.pi / 2),
     ("tree beside a wall", [(-10, 1.0), (12, 1.0), (14, 8.0)], WEDGE, 0.0),
@@ -264,3 +300,14 @@ def test_an_early_arrival_asks_the_planner_how_far_the_walk_is(walk, early, monk
     result = travel.follow(path, timeout_s=120.0, reach=lambda here: walk)
     assert result.outcome is Outcome.ARRIVED
     assert (result.elapsed_s < 8.0) is early
+
+
+def test_recorded_canal_oscillation_exhausts_headway_budget():
+    import json
+    from pathlib import Path as FilePath
+    from jev.clients.travel import RouteProgress
+    data = json.loads((FilePath(__file__).parent / 'fixtures/stormwind-canal-stall.json').read_text())
+    progress = RouteProgress()
+    stopped = next((t for t, x, y in data['samples']
+                    if progress.wedged((x, y), t, math.dist)), None)
+    assert stopped is not None and stopped < 100, 'real circling must not refresh the budget'
