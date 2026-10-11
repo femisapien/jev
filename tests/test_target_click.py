@@ -133,6 +133,40 @@ def test_verified_living_point_delivers_only_the_button_at_the_actual_cursor(har
     assert "effect unconfirmed" in result.detail
 
 
+@pytest.mark.parametrize("case,expected", [
+    ("healer", ClickCode.CLICKED),
+    ("ordinary", ClickCode.INTERRUPTED),
+    ("unspecified", ClickCode.INTERRUPTED),
+    ("wrong_target", ClickCode.WRONG_TARGET),
+    ("dead", ClickCode.INTERRUPTED),
+    ("modal", ClickCode.INTERRUPTED),
+    ("other_hover", ClickCode.UNKNOWN),
+    ("stale_geometry", ClickCode.STALE),
+])
+def test_ghost_can_click_only_an_explicit_verified_spirit_healer(harness, case, expected):
+    from jev.perceive.radio_frame import name_id
+
+    healer = name_id("Spirit Healer")
+    wanted = None if case == "unspecified" else 123 if case == "ordinary" else healer
+    selected = 123 if case in ("ordinary", "wrong_target") else healer
+    for row in (*harness.observations, *harness.samples):
+        row.update({"vitals.ghost": True, "target.name_id": selected,
+                    "cursor.name_id": selected})
+        if case == "dead":
+            row["vitals.dead"] = True
+        if case == "modal":
+            row["ui.modal"] = True
+        if case == "other_hover":
+            row["cursor.is_target"] = False
+    if case == "stale_geometry":
+        harness.view_age = 1.0
+    result = harness.run(expected_name_id=wanted)
+    assert result.code is expected
+    assert bool(harness.hid.buttons) is (case == "healer")
+    if case == "healer":
+        assert harness.revalidated, "the recovery exception still needs fresh body geometry"
+
+
 def test_missing_proposals_never_move_or_click(harness):
     harness.proposals = []
     result = harness.run()

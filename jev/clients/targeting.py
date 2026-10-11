@@ -317,8 +317,11 @@ class Targeting:
     def _eligible(values: dict | None, wanted: int | None, kind: str) -> ClickCode | None:
         if values is None:
             return ClickCode.BLIND
+        # Recovery must right-click the living Spirit Healer while the player is a ghost.
+        # Require that explicit identity; ordinary targeting and corpse looting still stop.
+        recovery = kind == "living" and wanted == radio_frame.name_id("Spirit Healer")
         if (values.get("ui.modal") is True or values.get("vitals.dead") is True
-                or values.get("vitals.ghost") is True):
+                or (values.get("vitals.ghost") is True and not recovery)):
             return ClickCode.INTERRUPTED
         if values.get("target.has") is not True:
             return ClickCode.NO_TARGET
