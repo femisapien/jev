@@ -128,6 +128,36 @@ def composition(tmp_path, *, node=None, config=None, tutor_first=True):
                            recorder=recorder)
 
 
+def test_teaching_composition_records_shadow_trips_from_live_position(tmp_path):
+    from jev.world.state_v1 import Bags, Char, Vitals
+    f = composition(tmp_path)
+    recorder = Recorder(tmp_path / 'shadow-runs')
+    try:
+        state = f.client.state().model_copy(update={
+            'char': Char(level=5, cls='mage'), 'quests': (),
+            'vitals': Vitals(hp=1, power=1, combat=False, dead=False, ghost=False),
+            'bags': Bags(free=10, money_copper=100, durability_min=1)})
+        # Real client state has map fractions, not a precomputed world position.
+        assert state.pos.world is None
+        assert f.playing.trip_position(state) == f.spine.trip_position(state)
+        assert f.playing.trip_position(state) is not None
+        f.spine.trip_services = Mock(return_value=[])
+        runtime = ClientRuntime(
+            client_id='fixture', graph=f.spine.graph, source=ClientSource(f.client),
+            recorder=recorder, trip_mode='shadow',
+            trip_position=f.playing.trip_position, trip_services=f.playing.trip_services,
+            trip_map_id=f.client.bounds.map_id)
+        runtime.tick(state=state)
+        evidence = read(recorder.dir / 'trips.jsonl')
+        assert evidence and evidence[0]['mode'] == 'shadow'
+        f.spine.trip_services.assert_called_once()
+        assert not f.teacher.requests and not f.hid.held
+    finally:
+        f.playing.close()
+        f.screenshots.close()
+        recorder.close()
+
+
 def test_real_worker_controller_and_executor_use_one_input_owner(tmp_path):
     f = composition(tmp_path)
     owners = []

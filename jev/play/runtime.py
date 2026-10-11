@@ -173,6 +173,12 @@ class PlayingBody:
     def validate(self, decision, step_id):
         return self.spine.validate(decision, step_id)
 
+    def trip_position(self, state):
+        return self.spine.trip_position(state)
+
+    def trip_services(self, state):
+        return self.spine.trip_services(state)
+
     def execute(self, arm, state, checkpoint):
         self._arm = arm
         # The supervisor's skill budget: bounded by the teaching episode while the tutor

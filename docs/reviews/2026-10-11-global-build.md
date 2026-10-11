@@ -91,6 +91,15 @@ pins the committed candidate and launch configuration, and runs bounded native W
 sessions for up to eight hours (six by default). It requires the expected character key
 and shadow trip mode. Wrong-character observations, unread telemetry, repeated failures,
 no XP/quest progress, excessive deaths, operator stop files, and the deadline stop the
-test. Its five focused regression tests pass. Status is written to `var/live-test/status.json`,
+test. Its six focused regression tests pass. Status is written to `var/live-test/status.json`,
 with per-session logs in `captures` and full evidence in `runs`. This supervision does
 not replace the release comparisons above or establish an improvement by itself.
+
+The initial native Windows test exposed a WSL data-symlink deployment gap and a Git
+identity issue with linked worktrees and detached stdin. The candidate now has readable
+local data, and revision capture uses the owning WSL distribution with an explicitly
+closed input pipe. The monitor also verifies the client's recorded revision. A live
+review found that the teaching wrapper omitted the new trip callbacks; these now forward
+to its live body, covered by a painted-radio integration test. Early play repaired broken
+equipment, sold 27 stacks, and recorded a kill and XP gain. These observations confirm
+execution, not a measured speed improvement.
