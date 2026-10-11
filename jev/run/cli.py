@@ -618,7 +618,10 @@ def _live(args, graph) -> int:
             from jev.coach.judge import Judge
             from jev.coach.model import open_model
 
-            coach_model = open_model(ROOT / "var", ROOT / ".env")
+            # Use the same lock-capable store as the teacher. A budget update on the
+            # Windows/WSL share spent nine seconds waiting on an unsupported byte lock.
+            coach_model = open_model(ROOT / "var", ROOT / ".env",
+                budget_path=Path(args.learning_store) / "coach-model-usage.json")
             if coach_model is not None:
                 # What the hive measured each quest and grind to be worth, lent beside the
                 # other priors and read once (V312); without it Jev's options are as before.

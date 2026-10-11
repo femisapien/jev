@@ -105,3 +105,11 @@ review found that the teaching wrapper omitted the new trip callbacks; these now
 to its live body, covered by a painted-radio integration test. Early play repaired broken
 equipment, sold 27 stacks, and recorded a kill and XP gain. These observations confirm
 execution, not a measured speed improvement.
+
+Further live checks measured coach budget bookkeeping at **9.0935 seconds** on the WSL
+share versus **0.0027 seconds** on Windows storage. The live launcher now keeps that
+counter in its configured learning store, preserving the previous count when creating
+the new counter. Coach records include bookkeeping latency separately from HTTP latency.
+The run also exposed recovery that drank, spent its recovered mana conjuring water, then
+stopped for insufficient mana. Hunts now allow one bounded drink of the new water and
+verify fresh vitals before pulling; unknown vitals and failed recovery still refuse a pull.

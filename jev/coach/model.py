@@ -88,6 +88,16 @@ class Budget:
     def allows(self) -> bool:
         return self.spent() < self.usd_per_day
 
+    def seed_from(self, previous: Path) -> None:
+        """Preserve the existing daily count when moving to a lock-capable store."""
+        previous = Path(previous)
+        if previous == self.path or not previous.is_file():
+            return
+        with file_lock(self.lock):
+            if not self.path.exists():
+                document = json.loads(previous.read_text(encoding='utf-8'))
+                atomic_json(self.path, document)
+
     def add(self, tokens: int, status: str) -> None:
         try:
             with file_lock(self.lock):
@@ -180,6 +190,7 @@ class CoachModel:
 
     def _done(self, point: str, state: dict, options: dict, answer: Answer,
               record: Path | None = None, note: dict | None = None) -> Answer:
+        bookkeeping_started = time.perf_counter()
         if self.budget is not None and answer.status in ("ok", "error", "timeout"):
             try:
                 self.budget.add(answer.tokens, answer.status)
@@ -188,7 +199,8 @@ class CoachModel:
         path = Path(record) if record is not None else self.record_path
         if path is not None:
             row = {"t": self.clock(), "point": point, "state": state,
-                   "options": options, **(note or {}), **asdict(answer)}
+                    "options": options, **(note or {}), **asdict(answer)}
+            row['bookkeeping_ms'] = _ms(bookkeeping_started)
             with self._record_lock, path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(row, sort_keys=True, default=str) + "\n")
         return answer
@@ -219,7 +231,7 @@ def settings(var: Path) -> dict[str, Any]:
 
 
 def open_model(var: Path, env_file: Path | None, *, record: Path | None = None,
-               say=print) -> CoachModel | None:
+               budget_path: Path | None = None, say=print) -> CoachModel | None:
     """The coach's model as `var`'s settings have it, or `None` when switched off. A missing
     credential is said once and is no model: the floor plays on."""
     from jev.play.providers import credential
@@ -233,7 +245,10 @@ def open_model(var: Path, env_file: Path | None, *, record: Path | None = None,
     except ValueError:
         say(f"coach model: no {KEY_NAME}; the scripted coach decides alone")
         return None
-    budget = Budget(Path(var) / USAGE, config["usd_per_day"])
+    previous = Path(var) / USAGE
+    budget = Budget(previous if budget_path is None else budget_path, config["usd_per_day"])
+    if budget_path is not None:
+        budget.seed_from(previous)
     say(f"coach model: {config['model']}, ${budget.spent():.2f} of "
         f"${config['usd_per_day']:.2f} spent today")
     return CoachModel(key, budget=budget, model=config["model"], record=record)

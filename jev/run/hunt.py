@@ -824,28 +824,36 @@ class Hunt:
                 and isinstance(mana, (int, float))
                 and mana < ((self.fight.mana_line() if hasattr(self.fight, "mana_line") else None)
                             or rest_mana(True))):
-            drank = self.rest.until(drink_to(True), role=Role.DRINK)
-            self.say(f"    drink: {drank.value}"
-                     + (f" - {self.rest.detail}" if self.rest.detail else ""))
-            if drank is Rested.INTERRUPTED:
-                return True                  # something is hitting us; fight it
-            if drank is Rested.BLIND:
-                self._readiness_unknown = True
-                return False
-            if self.conjure is not None:
-                self.conjure()
-            v = self.read()
-            if v is None:
-                self._readiness_unknown = True
-                return False
-            if v.get("vitals.combat") is True:
-                return True
-            mana = v.get("vitals.power")
-            if (isinstance(mana, bool) or not isinstance(mana, (int, float))
-                    or not math.isfinite(mana) or not 0 <= mana <= 1):
-                self._readiness_unknown = True
-                return False
-            if mana < rest_mana(True):
+            # Conjuring can spend the mana just recovered while putting usable water
+            # into the bags. Take one more bounded drink before declaring recovery
+            # impossible; never pull on the pre-conjure gauge or conjure in a loop.
+            for attempt in range(2 if self.conjure is not None else 1):
+                drank = self.rest.until(drink_to(True), role=Role.DRINK)
+                self.say(f"    drink: {drank.value}"
+                         + (f" - {self.rest.detail}" if self.rest.detail else ""))
+                if drank is Rested.INTERRUPTED:
+                    return True                  # something is hitting us; fight it
+                if drank is Rested.BLIND:
+                    self._readiness_unknown = True
+                    return False
+                if attempt == 0 and self.conjure is not None:
+                    self.conjure()
+                v = self.read()
+                if v is None:
+                    self._readiness_unknown = True
+                    return False
+                if v.get("vitals.combat") is True:
+                    return True
+                if v.get("vitals.dead") is True or v.get("vitals.ghost") is True:
+                    return False
+                mana = v.get("vitals.power")
+                if (isinstance(mana, bool) or not isinstance(mana, (int, float))
+                        or not math.isfinite(mana) or not 0 <= mana <= 1):
+                    self._readiness_unknown = True
+                    return False
+                if mana >= rest_mana(True):
+                    break
+            else:
                 return False
         if hasattr(self.fight, "buff_up"):
             self.fight.buff_up()              # a caster's lasting buffs, before the pull (V176)

@@ -606,6 +606,27 @@ def test_a_caster_drinks_before_the_pull_and_a_paladin_does_not():
         assert asked == expected, class_id
 
 
+@pytest.mark.parametrize('second_mana, ready', [(0.95, True), (0.2, False), (None, False)])
+def test_a_mage_drinks_newly_conjured_water_before_the_next_pull(second_mana, ready):
+    from jev.world.combat import Role
+    values = {'vitals.combat': False, 'vitals.hp': 1.0, 'vitals.power': .2,
+              'vitals.power_type': 0, 'char.class_id': 8, 'char.race_id': 1}
+    meals, conjures = [], []
+    class Rest(_Rest):
+        def until(self, fraction=.9, *, role=Role.FOOD, **_):
+            meals.append(role)
+            values['vitals.power'] = .95 if len(meals) == 1 else second_mana
+            return Rested.HEALTHY
+    hunt, _ = _hunt([], [(0, 8)], rest=Rest())
+    hunt.read = lambda: dict(values)
+    def conjure():
+        conjures.append(1)
+        values['vitals.power'] = .04
+    hunt.conjure = conjure
+    assert hunt._ready_to_pull() is ready
+    assert meals == [Role.DRINK, Role.DRINK] and conjures == [1]
+
+
 def test_a_casters_hunt_stands_short_of_each_station_and_a_paladins_does_not():
     asked = []
     hunt, _ = _hunt([], [(0, 8)])

@@ -95,6 +95,18 @@ def test_yesterdays_spend_is_not_todays(tmp_path):
     assert Budget(tmp_path / "usage.json", 1.0).allows()
 
 
+def test_moving_budget_preserves_spend_and_never_overwrites_the_new_counter(tmp_path):
+    old = Budget(tmp_path / 'old.json', .05)
+    old.add(1_000_000, 'ok')
+    moved = Budget(tmp_path / 'native' / 'usage.json', .05)
+    moved.seed_from(old.path)
+    assert moved.spent() == .04
+    moved.add(1_000_000, 'ok')
+    moved.seed_from(old.path)
+    assert moved.spent() == .08 and not moved.allows()
+    assert Budget(moved.path, .05).spent() == .08
+
+
 class FakeModel:
     """A model that answers from a script and remembers what it was asked."""
 
