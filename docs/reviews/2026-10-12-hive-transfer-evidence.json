@@ -1,0 +1,362 @@
+{
+  "at": "2026-10-12T09:42:42.887565+01:00",
+  "live_root": "/home/ash/ForeverV2-global-build",
+  "expected_prior": "/home/ash/ForeverV2-global-build/var/prior",
+  "prior_exists": false,
+  "loaded_choice_prior_points": 0,
+  "loaded_danger_prior_cells": 0,
+  "loaded_values": false,
+  "hive_promotes_to": "/home/ash/ForeverV2/var/prior",
+  "calibration_live_runs": "/home/ash/ForeverV2/runs",
+  "senses_live_runs": "/home/ash/ForeverV2/runs",
+  "latest_calibration_source_run": "20260929T094446-19bbaf",
+  "hive_travel_class": "/home/ash/JevHive/hive/client.py",
+  "live_travel_class": "/home/ash/ForeverV2-global-build/jev/clients/travel.py",
+  "hive_inherits_live_follower": false,
+  "hive_follow_mentions_route_progress": false,
+  "verdict": {
+    "primary": {
+      "candidate": {
+        "characters": 70,
+        "hours": 410.2536111111111,
+        "median_actual_time_index": 0.8526166496358584,
+        "median_utility_index": 0.7119687092430693
+      },
+      "control": {
+        "characters": 138,
+        "hours": 802.7747222222222,
+        "median_actual_time_index": 0.7905288739336622,
+        "median_utility_index": 0.6936639485241198
+      }
+    },
+    "checks": {
+      "deaths": {
+        "interval": [
+          1.0136666582796579,
+          1.2665581937213546
+        ],
+        "limit": 1.25,
+        "ratio": 1.1160533505957
+      },
+      "idle": {
+        "interval": [
+          0.7723307083084248,
+          1.022018388178928
+        ],
+        "limit": 1.25,
+        "ratio": 0.8630320775612441
+      },
+      "speed": {
+        "difference": 0.06014602246681433,
+        "floor": -0.040981714412922615,
+        "interval": [
+          0.032785452188857866,
+          0.11894637567803601
+        ]
+      },
+      "stuck": {
+        "interval": [
+          0.7984272894038602,
+          1.1361606994430358
+        ],
+        "limit": 1.25,
+        "ratio": 0.9545026015991395
+      },
+      "target": {
+        "interval": [
+          1.027540857499908,
+          1.2446984812336401
+        ],
+        "limit": 1.0,
+        "ratio": 1.1184419603634304
+      }
+    },
+    "status": "inconclusive",
+    "window": [
+      1791762295.132441,
+      1791783895.132441
+    ],
+    "coverage": {
+      "candidate": {
+        "assigned": 71,
+        "observed": 70,
+        "unobserved_or_censored": [
+          1059
+        ]
+      },
+      "control": {
+        "assigned": 139,
+        "observed": 138,
+        "unobserved_or_censored": [
+          1058
+        ]
+      }
+    },
+    "merged": false
+  },
+  "percentage_display": {
+    "printed": "the candidate faster: speed index difference +0.060 (90% [+0.033, +0.119], +29% of the control's median baseline index); dies more: deaths a played hour 1.12 times the control's (90% [1.01, 1.27])",
+    "legacy_guard": 0.2,
+    "protocol2_guard": 0.05,
+    "reconstructed_baseline": 0.8196342882584523,
+    "correct_relative_percent": 7.3381535312061885,
+    "raw_median_index_ratio_percent": 7.853954200717306
+  },
+  "historical_judgments": {
+    "count": 20,
+    "outcomes": {
+      "not kept": 15,
+      "kept": 5
+    },
+    "kept": [
+      {
+        "branch": "bet-play-2",
+        "commit": "fa52a0d19029a0a31748ca9ac4866a74f07a8b7c",
+        "at": 1791192484.9324505,
+        "merged": true,
+        "detail": "target a played hour, candidate over control 1.144 (90% [0.972, 1.366]: below 1); speed index difference +0.101 (90% [+0.005, +0.185], floor -0.105: pass); deaths ratio 1.147 (90% [0.991, 1.336], limit 1.25: pass); idle ratio 0.925 (90% [0.662, 1.228], limit 1.25: pass); stuck ratio 1.366 (90% [0.692, 2.373], limit 1.25: pass); 112 and 178 characters, 274.9 and 439.1 played hours; target events 682 and 952 (baselines 2054 and 3537); left out for too little baseline 0 and 0; hive-findings fast-forwarded to fa52a0d"
+      },
+      {
+        "branch": "bet-kits-2",
+        "commit": "a5ad18744cfc7909f17e22bb6c6302b63b44f048",
+        "at": 1791206410.6702988,
+        "merged": true,
+        "detail": "target a played hour, candidate over control 0.888 (90% [0.754, 1.048]: below 1); speed index difference +0.092 (90% [+0.000, +0.146], floor -0.103: pass); deaths ratio 0.895 (90% [0.764, 1.046], limit 1.25: pass); idle ratio 0.736 (90% [0.505, 1.028], limit 1.25: pass); stuck ratio 1.382 (90% [0.508, 3.087], limit 1.25: pass); 109 and 176 characters, 289.3 and 463.8 played hours; target events 681 and 1230 (baselines 1711 and 2569); left out for too little baseline 0 and 0; hive-findings fast-forwarded to a5ad187"
+      },
+      {
+        "branch": "bet-fight",
+        "commit": "411f4273afe2b77b6268916da46b6e64899c273d",
+        "at": 1791241483.48259,
+        "merged": true,
+        "detail": "target a played hour, candidate over control 0.819 (90% [0.688, 0.974]: below 1); speed index difference +0.000 (90% [+0.000, +0.011], floor -0.085: pass); deaths ratio 1.213 (90% [1.042, 1.423], limit 1.25: pass); idle ratio 0.913 (90% [0.644, 1.300], limit 1.25: pass); stuck ratio 0.803 (90% [0.273, 1.887], limit 1.25: pass); 104 and 173 characters, 276.0 and 460.2 played hours; target events 527 and 1073 (baselines 1494 and 2412); left out for too little baseline 0 and 1; hive-findings fast-forwarded to 411f427"
+      },
+      {
+        "branch": "bet-spots-food",
+        "commit": "d3c653f",
+        "at": 1791536507.0037293,
+        "merged": true,
+        "detail": "target a played hour, candidate over control 0.667 (90% [0.569, 0.769]: below 1); speed index difference +0.190 (90% [+0.101, +0.251], floor -0.151: pass); deaths ratio 0.687 (90% [0.602, 0.776], limit 1.25: pass); idle ratio 0.680 (90% [0.536, 0.857], limit 1.25: pass); stuck ratio 0.886 (90% [0.706, 1.117], limit 1.25: pass); 80 and 108 characters, 448.4 and 610.2 played hours; target events 945 and 1928 (baselines 1058 and 2001); left out for too little baseline 0 and 0; bet-spots-food (d3c653f) merged into hive-findings"
+      },
+      {
+        "branch": "bet-gather-capacity",
+        "commit": "35ba9fdd2690b22fea400d3f36aae81663d0b3f3",
+        "at": 1791688914.9191163,
+        "merged": true,
+        "detail": "target a played hour, candidate over control 0.836 (90% [0.720, 0.976]: below 1); speed index difference +0.077 (90% [+0.004, +0.140], floor -0.167: pass); deaths ratio 0.810 (90% [0.711, 0.932], limit 1.25: pass); idle ratio 0.917 (90% [0.708, 1.178], limit 1.25: pass); stuck ratio 1.165 (90% [0.935, 1.474], limit 1.25: pass); 78 and 97 characters, 545.2 and 662.6 played hours; target events 1108 and 1611 (baselines 920 and 1326); left out for too little baseline 10 and 12; hive-findings fast-forwarded to 35ba9fd"
+      }
+    ]
+  },
+  "last_published_prior": {
+    "class": "mage",
+    "danger": false,
+    "class_hours": 3023.2,
+    "written": "2026-10-08T19:00",
+    "since": "20260929T101904",
+    "hive_hours": 25083.0,
+    "lent": true,
+    "stations": 4843,
+    "creatures_lent": 341,
+    "cells": 69007,
+    "agreement": {
+      "creatures": {
+        "pass": 5,
+        "total": 14
+      },
+      "steps": {
+        "pass": 16,
+        "total": 28
+      }
+    }
+  },
+  "stops": [
+    "CYCLES_STOP",
+    "PROMOTE_STOP"
+  ],
+  "current_parity": {
+    "parts": "ground,census,corpse,lifts,flights,plates,pet,trainer",
+    "shards": [
+      7
+    ],
+    "note": "quests off again 9 Oct 00:16: with V455 merged the slot-by-slot log still loops accepts on shard 7 (2,886 of the hive's 4,284 accept lines 20:40-23:40 from an eighth of its bots)"
+  },
+  "coach_status": {
+    "at": 1791792415.8336263,
+    "state": "degraded",
+    "reason": "You've hit your weekly limit \u00b7 resets Oct 14, 4am (Europe/London)",
+    "retry_at": 1791792419.1971521,
+    "report": "/home/ash/JevHive/docs/coach/2026-10-12-0901.md",
+    "model_diagnosis": false
+  },
+  "latest_live_runs": [
+    {
+      "run": "20261012T004111-79a04d",
+      "first": {
+        "name": null,
+        "key": 1942881960,
+        "cls": "mage",
+        "race": "human",
+        "faction": "alliance",
+        "level": 17,
+        "xp_pct": 0.0
+      },
+      "last": {
+        "name": null,
+        "key": 1942881960,
+        "cls": "mage",
+        "race": "human",
+        "faction": "alliance",
+        "level": 17,
+        "xp_pct": 0.0
+      },
+      "start": 1791762090.260093,
+      "end": 1791762990.0184858,
+      "actions": {
+        "hybrid_routine": 3,
+        "reflex": 10,
+        "routine": 6
+      },
+      "models": {
+        "jev-1.13.0": 36
+      },
+      "source_commit": "71ff145652a2a454c931c59b680549f3a96fd16d"
+    },
+    {
+      "run": "20261012T005630-f1f6c8",
+      "first": {
+        "name": null,
+        "key": 1942881960,
+        "cls": "mage",
+        "race": "human",
+        "faction": "alliance",
+        "level": 17,
+        "xp_pct": 0.0
+      },
+      "last": {
+        "name": null,
+        "key": 1942881960,
+        "cls": "mage",
+        "race": "human",
+        "faction": "alliance",
+        "level": 17,
+        "xp_pct": 0.007874015748031496
+      },
+      "start": 1791763001.6451547,
+      "end": 1791763911.3420842,
+      "actions": {
+        "hybrid_routine": 11,
+        "reflex": 15,
+        "routine": 2
+      },
+      "models": {
+        "jev-1.13.0": 54
+      },
+      "source_commit": "71ff145652a2a454c931c59b680549f3a96fd16d"
+    }
+  ],
+  "latest_live": {
+    "runs": 2,
+    "total_s": 1821.0966689300535,
+    "cat": {
+      "session": 14.706668930053711,
+      "idle": 130.60999999999999,
+      "travel": 637.0799999999999,
+      "fight": 316.24999999999994,
+      "loot": 59.58,
+      "search": 4.32,
+      "service": 577.1899999999999,
+      "rest": 55.510000000000005,
+      "objective": 25.85
+    },
+    "xp_src": {
+      "kill_unmatched": 129.1
+    },
+    "handed": 0,
+    "deaths": 1,
+    "kills": 21,
+    "headline": {
+      "hours": 0.5058601858139038,
+      "xp_h": 255.2088573491597,
+      "deaths_h": 1.97683080828164,
+      "kills_h": 41.51344697391444,
+      "handed_h": 0.0,
+      "quest_xp_share": 0.0,
+      "fight_quest_share": 18.785383875365252
+    },
+    "window": [
+      "2026-10-12T00:41:00",
+      "2026-10-12T01:13:00"
+    ],
+    "source": "/home/ash/ForeverV2-global-build/runs"
+  },
+  "all_candidate_live": {
+    "runs": 20,
+    "total_s": 14297.897419910429,
+    "cat": {
+      "session": 1946.397419910431,
+      "idle": 875.74,
+      "search": 567.11,
+      "approach": 2369.27,
+      "fight": 1980.6499999999999,
+      "loot": 282.02000000000004,
+      "rest": 1788.8099999999988,
+      "travel": 829.5899999999999,
+      "service": 2358.12,
+      "objective": 25.85,
+      "dead": 1274.34
+    },
+    "xp_src": {
+      "kill": 11102.500000000005,
+      "kill_unmatched": 188.2,
+      "other": 118.1
+    },
+    "handed": 0,
+    "deaths": 10,
+    "kills": 102,
+    "headline": {
+      "hours": 3.9716381721973413,
+      "xp_h": 2872.567818454618,
+      "deaths_h": 2.5178527263644006,
+      "kills_h": 25.682097808916886,
+      "handed_h": 0.0,
+      "quest_xp_share": 0.0,
+      "fight_quest_share": 14.033531931806024
+    },
+    "window": [
+      "2026-10-11T00:00:00",
+      "2026-10-12T09:30:00"
+    ],
+    "source": "/home/ash/ForeverV2-global-build/runs"
+  },
+  "resources": {
+    "at": "2026-10-12T09:43:30.459091+01:00",
+    "charged_bytes": 11869908992,
+    "anonymous_bytes": 8976236544,
+    "file_bytes": 2438172672,
+    "working_set_estimate_bytes": 11347005440,
+    "memory_events": "low 0\nhigh 28027192\nmax 0\noom 0\noom_kill 2\noom_group_kill 0\n",
+    "pressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=3885674956\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=3762816043\n",
+    "caveat": "Cgroup includes server, farms, jobs and charged file cache. Historical OOM counters are not attributed to the mage stall."
+  },
+  "source_commits": {
+    "live": "71ff145652a2a454c931c59b680549f3a96fd16d",
+    "hive": "f768eb690243cb4448001b59f2825fda7d7179ff",
+    "hive_played": "35ba9fdd2690b22fea400d3f36aae81663d0b3f3"
+  },
+  "live_status_summary": {
+    "commit": "71ff145652a2a454c931c59b680549f3a96fd16d",
+    "started_at": 1791762069.3995852,
+    "at": 1791763911.8585527,
+    "state": "stopped",
+    "reason": "no observed XP or quest progress for thirty minutes",
+    "deaths": 1,
+    "character": {
+      "name": null,
+      "key": 1942881960,
+      "cls": "mage",
+      "race": "human",
+      "faction": "alliance",
+      "level": 17,
+      "xp_pct": 0.007874015748031496
+    }
+  }
+}
